@@ -11,8 +11,8 @@ import path from "node:path";
 
 export const DEFAULT_MAX_OUT_SIZE = "1GB";
 
-/** Matches `<stem>-<hash>-<hit|death>-<firstHit>-<clipStart>-<clipEnd>.mp4`. */
-const MANAGED_CLIP_PATTERN = /-(?:hit|death)-\d+-\d+-\d+\.mp4$/i;
+/** Matches `<stem>-<hash>-<hit|death|opening|conversion>-<firstHit>-<clipStart>-<clipEnd>.mp4`. */
+const MANAGED_CLIP_PATTERN = /-(?:hit|death|opening|conversion)-\d+-\d+-\d+\.mp4$/i;
 
 export interface RetentionResult {
   /** Managed bytes still present after pruning. */

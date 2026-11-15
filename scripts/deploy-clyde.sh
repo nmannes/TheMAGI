@@ -11,7 +11,7 @@
 #   3. optionally copies ~/Slippi replays, keeping existing server files
 #   4. runs npm ci on the server
 #   5. writes ~/clippi/key.env if missing (never overwrites it)
-#   6. parses one replay as a smoke test
+#   6. runs a chronological query against one replay as a smoke test
 #
 # Safe to re-run. Override paths with MAGI_TARGET, MELEE_ISO,
 # SLIPPI_PLAYBACK_APPIMAGE, REPLAY_DIR, CLYDE_HOST, CLYDE_DIR or CLYDE_ASSETS.
@@ -150,7 +150,7 @@ echo "wrote \$key_env"
 REMOTE
 
 if ((RUN_SMOKE)); then
-  log "parsing one replay on $HOST"
+  log "querying one replay in chronological mode on $HOST"
   remote 'bash -s' <<REMOTE
 set -euo pipefail
 cd "\$HOME/$REMOTE_DIR"
@@ -163,7 +163,14 @@ if [ -z "\$replay" ]; then
   exit 1
 fi
 echo "replay: \$replay"
-npx --no-install tsx src/hit-review-cli.ts --replay "\$replay" --target "\$MAGI_TARGET" --limit 1 --json
+# Throwaway cursor so the smoke query always selects from the start and never
+# disturbs the production cursor/cache.
+cursor="\${TMPDIR:-/tmp}/hit-review-smoke-\$\$.json"
+rm -f "\$cursor"
+npx --no-install tsx src/hit-review-cli.ts \
+  --replay "\$replay" --target "\$MAGI_TARGET" \
+  --chronological --cursor "\$cursor" --limit 2 --json
+rm -f "\$cursor"
 REMOTE
 fi
 

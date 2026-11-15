@@ -2,7 +2,7 @@
 
 ## 1.13.0 — 2026-11-15
 
-- Add a headless hit-review pipeline for the replay folder. It finds the hits the target player took, groups nearby hits, ranks the costliest sequences, and renders each one to MP4 with the game audio. Optional Telegram delivery sends each clip with a caption, a state file prevents repeat delivery, and a configurable output-folder cap deletes the oldest tool-created clips first.
+- Add a headless hit-review pipeline for the replay folder. The daily job walks replay history in chronological order and renders two clips at a time: the opening hit of each opponent conversion (starting 5 seconds before the hit) or a landed conversion of at least two hits (ending 5 seconds after the player's last hit). A local gitignored cursor records the most recent clip and caches parsed events so unchanged replays are not re-parsed. Optional Telegram delivery sends each clip with a caption, and a configurable output-folder cap deletes the oldest tool-created clips first.
 - Add a container image and Compose service for the hit-review job. The image contains Node, ffmpeg, Xvfb, Mesa, and a null ALSA device; the Melee ISO, Slippi Playback build, replays, output, and credentials are mounted at runtime and are excluded from version control. Compose sets the 1 GB `/dev/shm` that Dolphin requires.
 - Add `scripts/deploy-clyde.sh` and `scripts/clyde-inventory.sh` for repeatable deployment to the clyde server, plus source-only documentation and release checks that do not require the marketing site.
 

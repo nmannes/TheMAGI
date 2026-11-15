@@ -1,31 +1,42 @@
 # Headless hit review
 
-`hit-review` is a Linux CLI for reviewing the moments you get hit in Super Smash
-Bros. Melee. It reads Slippi replays, ranks the hits you took, renders short MP4
-clips of them, and can send the clips to Telegram. It is designed to run from
-cron or a systemd timer on a home server, with no visible desktop session.
+`hit-review` is a Linux CLI for reviewing your Melee decisions. It walks forward
+through your Slippi replay history one event at a time, renders a short MP4 for
+each event, and can send the clips to Telegram. It is designed to run from cron
+or a systemd timer on a home server, with no visible desktop session.
 
 It uses MAGI's existing replay parser and measured event data. It does not call
 an LLM and it does not make combo videos.
 
 ## What a clip is
 
-For the configured player (the **target**), the CLI:
+For the configured player (the **target**), chronological review has exactly two
+event types:
 
-1. Keeps conversions where the target is the **victim**. In MAGI's
-   `ConversionRecord`, `attackerSlot` is the player who landed the conversion;
-   hits where the target is the attacker are ignored.
-2. Flattens the individual hit frames. MAGI conversions can span tech chases,
-   knockdowns, and ledge traps for many seconds, so a conversion range is **not**
-   used as a clip range.
-3. Groups hits that are at most 45 frames (0.75 s) apart and splits a group at a
-   stock death.
-4. Renders 90 frames (1.5 s) before the first hit and 90 frames after the last
-   hit. A sequence that took a stock gets 150 frames (2.5 s) after the last hit.
-   Clips are capped at 20 seconds and at the replay's last frame.
-5. Associates a death with the stock record using the killing conversion's final
-   move and stock end frame. If no hit can be associated with a death, it emits
-   an `unattributed-death` clip instead of guessing.
+1. **Opening hit taken** — the first hit of a conversion landed by the opponent,
+   with the target as the victim. Follow-up hits in that conversion are not
+   separate events. The clip starts 5 seconds (300 frames) before that first hit
+   and ends 2 seconds (120 frames) after it. The caption also reports what the
+   full opponent conversion became, without putting those follow-up hits in the
+   video.
+2. **Conversion landed** — a conversion where the target is the attacker and at
+   least two hits connected. The clip starts 5 seconds before the first hit and
+   ends 5 seconds (300 frames) after the target's last hit. A one-hit conversion
+   is not enough for this event.
+
+Clips are capped at 20 seconds and at the replay's last frame. Both event types
+are ordered by the wall-clock instant of their first hit. That instant is
+`metadata.startAt` plus `(frame + 123) / 60` seconds: Slippi records `startAt`
+when the replay's first frame is written, and replay frames begin at `-123`
+(frame 0 is when the in-game timer starts counting down). A local cursor file
+records the most recent generated clip, so each run continues with the next
+events instead of repeating clips.
+
+Slippi calls both event types **conversions**. A conversion can continue through
+a tech chase, a ledge trap, or another interaction that is not hitstun; the CLI
+therefore calls a landed event a "conversion," never a confirmed true combo. It
+also does not label a sequence with a named technique unless the evidence would
+establish every condition of that technique.
 
 The clip caption lists the moves that connected, the percent before and after,
 the opening type, and — only when MAGI measured it — the DI result. A
@@ -34,9 +45,9 @@ from the measured-DI search, not from a measured stick input on the final hit.
 For throw deaths there is often no measurable final-hit DI, so the caption says
 `DI: not measured for this hit` rather than inventing a verdict.
 
-The CLI does not label a sequence with a named technique unless the evidence
-would establish every condition of that technique. It describes the hits that
-were recorded.
+An opening-hit event attributes a stock death to the opponent conversion when
+MAGI can match the conversion's final move and stock record. The event still
+shows only the opening hit; the caption reports the resulting stock.
 
 ## Requirements
 
@@ -116,7 +127,8 @@ Put these in `key.env` (loaded by the daily script) or the service environment:
 | `SLIPPI_PLAYBACK` | Path to the Slippi Playback AppImage or extracted `AppRun`. |
 | `MELEE_ISO` | Path to the Melee ISO. |
 | `REPLAY_DIR` | Replay folder to scan. Default `~/Slippi`. |
-| `HIT_REVIEW_LIMIT` | Clips per run. Default `5`. |
+| `HIT_REVIEW_LIMIT` | Clips per run. Default `2`. |
+| `HIT_REVIEW_CURSOR` | Local chronological cursor and parsed-event cache. Default `<repo>/data/hit-review-cursor.json`. |
 | `HIT_REVIEW_RESOLUTION` | `480p`, `720p`, `1080p`, `1440p`, `2160p`, or a raw EFBScale. Default `720p`. |
 | `HIT_REVIEW_MAX_OUT_SIZE` | Output cap. Default `1GB`; `0` disables pruning. |
 | `HIT_REVIEW_OUT` | Output directory. Default `~/.magi-melee/hit-review`. |
@@ -135,8 +147,12 @@ Put these in `key.env` (loaded by the daily script) or the service environment:
 Clips go to `~/.magi-melee/hit-review` by default. Every run finishes by
 pruning **only files this tool created**:
 
-- `*.mp4` whose name matches `<stem>-<hash>-<hit|death>-<firstHit>-<start>-<end>.mp4`
+- `*.mp4` whose name matches `<stem>-<hash>-<opening|conversion|hit|death>-<firstHit>-<start>-<end>.mp4`
 - the matching `*.json` metadata sidecar
+
+Chronological review writes `opening` and `conversion` labels. The older
+cost-ranked mode still writes `hit` and `death` labels; retention recognizes all
+four so old clips continue to be pruned normally.
 
 It deletes oldest first until the managed files are at or below the cap. Other
 files in the folder are never deleted. A cap of `0` disables pruning:
@@ -151,55 +167,67 @@ re-renders it because the replay was not marked processed.
 
 ## Usage
 
-Analyze one replay and print the selected sequences as JSON, without rendering:
-
-```bash
-npx tsx src/hit-review-cli.ts \
-  --replay /path/to/game.slp \
-  --target 'POOK#392' \
-  --limit 5 --json
-```
-
-Render the top five hits taken across a folder:
+Preview the next two chronological events without rendering:
 
 ```bash
 npx tsx src/hit-review-cli.ts \
   --dir ~/Slippi \
   --target 'POOK#392' \
-  --limit 5 \
-  --render
+  --chronological \
+  --limit 2 --json
 ```
 
-Render and send:
+Render and send the next two events:
 
 ```bash
 npx tsx src/hit-review-cli.ts \
   --dir ~/Slippi \
   --target 'POOK#392' \
-  --limit 5 \
+  --chronological \
+  --cursor data/hit-review-cursor.json \
+  --limit 2 \
   --render --telegram
 ```
 
 Or use the npm script:
 
 ```bash
-npm run hit-review -- --dir ~/Slippi --target 'POOK#392' --limit 5 --render
+npm run hit-review -- --dir ~/Slippi --target 'POOK#392' --chronological --limit 2 --render
 ```
 
-Useful filters:
+Useful chronological options:
 
-- `--deaths-only` — only sequences that took a stock.
-- `--min-damage 20` — ignore smaller hits.
-- `--limit 0` — render every selected sequence. This can be a lot of clips.
-- `--all` — process every discovered replay, ignoring the state file.
-- `--force` — reprocess and resend clips already marked delivered.
-- `--no-state` — do not read or write state.
-- `--since-hours 168` — on a fresh state, scan files from the last week.
+- `--limit 2` — two clips per run; the daily wrapper sets this by default.
+- `--cursor PATH` — use a specific cursor/cache file. The default is
+  `./data/hit-review-cursor.json`, which is gitignored.
+- `--reset-cursor` — ignore the saved position for this run, starting again at
+  the oldest event. The parsed-event cache is kept.
+- `--force` — ignore the cursor when selecting, but still advance it after each
+  successful clip. Useful for a manual re-send.
+- `--deaths-only` — only events whose conversion took a stock.
+- `--min-damage 20` — ignore events whose full conversion is below 20%.
+- `--limit 0` — render every event after the cursor. This can be a lot of clips.
+- `--dry-run` — print the selected events without rendering, sending, or
+  changing the cursor.
+
+The cursor file is local runtime state. It holds the timestamp and identity of
+the most recent generated clip plus a cache of parsed events per replay. The
+cache is what makes a daily run cheap: unchanged replays are not re-parsed. If
+the configured target changes, the cursor and cache reset automatically.
+
+### Legacy cost-ranked mode
+
+Without `--chronological`, the CLI keeps the older behavior: it ranks the hits
+you took by damage, move count, and stock loss, and renders the top `--limit`.
+The `--state`, `--since-hours`, `--all`, and `--no-state` options belong to that
+mode. New deployments should use the chronological daily wrapper below.
 
 ## Daily cron job
 
 The wrapper script loads `key.env`, takes a lock so two runs cannot overlap, and
-calls the CLI with `--render --telegram`:
+calls the CLI with `--chronological --limit 2 --render --telegram`. It keeps its
+cursor at `<repo>/data/hit-review-cursor.json` unless `HIT_REVIEW_CURSOR` points
+somewhere else:
 
 ```bash
 ./scripts/hit-review-daily.sh
@@ -297,10 +325,13 @@ Check it with `systemctl --user list-timers` and
 5. Run one dry run, then one real run with `--limit 1`, before enabling the
    timer.
 
-The state file lives at `~/.magi-melee/hit-review-state.json`. It records each
-replay's size and modification time, so an unchanged replay is skipped. If a
-replay is replaced or moved, it is processed again. Delivered clips are tracked
-for 60 days to prevent duplicate Telegram messages.
+The chronological cursor lives at `data/hit-review-cursor.json` by default. It
+records the most recent generated clip and a cache of parsed events keyed by
+each replay's size and modification time. A new run re-parses only new or
+changed replays. If a clip render or Telegram send fails, the cursor does not
+move past that event, so the next run retries it. The older cost-ranked state
+file at `~/.magi-melee/hit-review-state.json` is still used only when the CLI is
+run without `--chronological`.
 
 ## Docker
 
@@ -331,8 +362,10 @@ negative. If a bot was removed and re-added, its chat id can change.
 **Telegram file too large** — the Bot API caps video uploads at 50 MB. Lower
 `HIT_REVIEW_RESOLUTION`, or render fewer/longer clips with a lower bitrate.
 
-**Replays are skipped** — they are unchanged and already in the state file. Use
-`--all` to process everything or `--force` to re-render and resend.
+**No new clips** — every event is at or before the cursor. Use `--json` to see
+the cursor position, or `--reset-cursor` to start the chronological walk again.
+In the legacy cost-ranked mode, unchanged replays are skipped through the state
+file instead; use `--all` or `--force` there.
 
 **Old clips disappear** — that is the size cap. Raise
 `HIT_REVIEW_MAX_OUT_SIZE` or set it to `0` to disable pruning.

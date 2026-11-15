@@ -11,7 +11,7 @@ APP_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 export REPLAY_DIR="${REPLAY_DIR:-/replays}"
 export ASSETS_DIR="${ASSETS_DIR:-/assets}"
 export HIT_REVIEW_OUT="${HIT_REVIEW_OUT:-/data/hit-review}"
-export HIT_REVIEW_STATE="${HIT_REVIEW_STATE:-/data/hit-review-state.json}"
+export HIT_REVIEW_CURSOR="${HIT_REVIEW_CURSOR:-/data/hit-review-cursor.json}"
 
 # Dolphin/Qt wants a private runtime directory. The image creates one for
 # UID 1000; fall back to a per-UID directory when run with --user.
@@ -87,13 +87,13 @@ if [[ ! -f "$MELEE_ISO" ]]; then
   exit 1
 fi
 
-mkdir -p "$HIT_REVIEW_OUT" "$(dirname "$HIT_REVIEW_STATE")"
+mkdir -p "$HIT_REVIEW_OUT" "$(dirname "$HIT_REVIEW_CURSOR")"
 
 echo "hit-review container"
 echo "  replays:  $REPLAY_DIR"
 echo "  assets:   $ASSETS_DIR"
 echo "  output:   $HIT_REVIEW_OUT"
-echo "  state:    $HIT_REVIEW_STATE"
+echo "  cursor:   $HIT_REVIEW_CURSOR"
 echo "  target:   ${MAGI_TARGET:-(from key.env or config)}"
 echo "  telegram: ${HIT_REVIEW_TELEGRAM:-1}"
 

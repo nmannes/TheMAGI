@@ -173,6 +173,8 @@ test-replays/
 /assets/
 /replays/
 /data/
+# Local chronological hit-review cursor and its parsed-event cache
+hit-review-cursor.json
 docker.env
 
 # Vite build cache (never commit)

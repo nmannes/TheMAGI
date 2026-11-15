@@ -15,7 +15,7 @@ for the Electron desktop app.
 | `/app` | image | Source, `node_modules`, scripts |
 | `/replays` | host mount | Slippi `.slp` files (read-only) |
 | `/assets` | host mount | Melee ISO and Slippi Playback (read-only) |
-| `/data` | host mount | Rendered clips, state file, logs |
+| `/data` | host mount | Rendered clips, chronological cursor/cache, logs |
 | `MAGI_TARGET`, Telegram variables | `docker.env` or `-e` | Player and delivery settings |
 
 `node_modules` is installed by `npm ci` while the image is built. The ISO,
@@ -161,9 +161,11 @@ The container exits after each run, so use the host's cron or a systemd timer:
 17 20 * * * cd /opt/clippi && HOST_REPLAYS_DIR=/srv/slippi HOST_ASSETS_DIR=/opt/hit-review-assets HOST_DATA_DIR=/srv/hit-review docker compose run --rm hit-review >> /var/log/hit-review.log 2>&1
 ```
 
-`docker compose run --rm` cleans up the one-shot container. The state file in
-`/data` prevents the same replay from being delivered twice, and the output cap
-prunes only clips this tool created.
+`docker compose run --rm` cleans up the one-shot container. The cursor file at
+`/data/hit-review-cursor.json` records the most recent clip and caches parsed
+events, so each run continues with the next two events instead of repeating
+clips or re-parsing unchanged replays. The output cap prunes only clips this
+tool created.
 
 ## Troubleshooting
 

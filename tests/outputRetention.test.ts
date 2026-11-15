@@ -46,6 +46,9 @@ describe("isManagedOutputFile", () => {
   it("matches only the clip/sidecar names this tool creates", () => {
     expect(isManagedOutputFile("Game_20260101T000000-abcdef12-hit-100-10-190.mp4")).toBe(true);
     expect(isManagedOutputFile("Game_20260101T000000-abcdef12-death-400-310-550.mp4")).toBe(true);
+    expect(isManagedOutputFile("Game_20260101T000000-abcdef12-opening-400-100-520.mp4")).toBe(true);
+    expect(isManagedOutputFile("Game_20260101T000000-abcdef12-conversion-700-400-1030.mp4")).toBe(true);
+    expect(isManagedOutputFile("Game_20260101T000000-abcdef12-opening-400-100-520.json")).toBe(true);
     expect(isManagedOutputFile("Game_20260101T000000-abcdef12-hit-100-10-190.json")).toBe(true);
 
     expect(isManagedOutputFile("keep.txt")).toBe(false);

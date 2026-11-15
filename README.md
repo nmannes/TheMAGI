@@ -80,7 +80,7 @@ You can finish setup later and reopen it from **Settings → Setup wizard**. Set
 
 **Mac and Linux:** use MAGI for your replay library, stats, review notes, and coaching. Replays open in a separate Slippi Dolphin window. Check the download page for a build that matches your computer.
 
-**Headless hit review (Linux):** the `hit-review` CLI renders short clips of the moments you got hit and can deliver them to Telegram on a schedule. See [docs/hit-review.md](docs/hit-review.md).
+**Headless hit review (Linux):** the `hit-review` CLI walks your replay history and renders two review clips at a time — the opening hit you took or a conversion you landed — and can deliver them to Telegram on a schedule. See [docs/hit-review.md](docs/hit-review.md).
 
 **Docker:** the same headless hit-review pipeline runs in a container, with the ISO, playback build, replays, output and credentials mounted at run time. See [docs/docker.md](docs/docker.md).
 

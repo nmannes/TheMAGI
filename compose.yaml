@@ -15,7 +15,7 @@ services:
       REPLAY_DIR: /replays
       ASSETS_DIR: /assets
       HIT_REVIEW_OUT: /data/hit-review
-      HIT_REVIEW_STATE: /data/hit-review-state.json
+      HIT_REVIEW_CURSOR: /data/hit-review-cursor.json
     volumes:
       - "${HOST_REPLAYS_DIR:-./replays}:/replays:ro"
       - "${HOST_ASSETS_DIR:-./assets}:/assets:ro"

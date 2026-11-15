@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# Daily hit-review job: analyze new replays, render the costliest hits taken,
-# and send the clips to Telegram.
+# Daily hit-review job: walk forward through replay history and render the next
+# two review events, then send them to Telegram.
+#
+# An event is either the first hit of an opponent conversion (5 seconds before
+# the hit) or a landed conversion of at least two hits (5 seconds after the
+# player's last hit). A local cursor file records the most recent generated
+# clip, so each run continues chronologically without repeating clips.
 #
 # Intended for cron or a systemd timer. It loads key.env from the repo root,
 # takes an flock so runs cannot overlap, and leaves rendered clips under
-# ~/.magi-melee/hit-review/<date>/ by default.
+# ~/.magi-melee/hit-review/ by default.
 #
 # Required environment (or key.env):
 #   MAGI_TARGET=POOK#392
@@ -15,7 +20,8 @@
 #
 # Useful overrides:
 #   REPLAY_DIR=~/Slippi          replay folder to scan
-#   HIT_REVIEW_LIMIT=5           clips per run
+#   HIT_REVIEW_LIMIT=2           clips per run
+#   HIT_REVIEW_CURSOR=...        local cursor file (default <repo>/data/hit-review-cursor.json)
 #   HIT_REVIEW_RESOLUTION=720p   clip resolution
 #   HIT_REVIEW_MAX_OUT_SIZE=1GB  cap on clips kept in the output folder (0 disables)
 #   HIT_REVIEW_TELEGRAM=0        render only, do not contact Telegram
@@ -77,7 +83,8 @@ if [[ -z "$NPX_BIN" ]]; then
 fi
 
 REPLAY_DIR="${REPLAY_DIR:-${HIT_REVIEW_DIR:-$HOME/Slippi}}"
-HIT_REVIEW_LIMIT="${HIT_REVIEW_LIMIT:-5}"
+HIT_REVIEW_LIMIT="${HIT_REVIEW_LIMIT:-2}"
+HIT_REVIEW_CURSOR="${HIT_REVIEW_CURSOR:-$ROOT_DIR/data/hit-review-cursor.json}"
 HIT_REVIEW_RESOLUTION="${HIT_REVIEW_RESOLUTION:-720p}"
 HIT_REVIEW_MAX_OUT_SIZE="${HIT_REVIEW_MAX_OUT_SIZE:-1GB}"
 HIT_REVIEW_TELEGRAM="${HIT_REVIEW_TELEGRAM:-1}"
@@ -91,6 +98,8 @@ fi
 ARGS=(
   --dir "$REPLAY_DIR"
   --limit "$HIT_REVIEW_LIMIT"
+  --chronological
+  --cursor "$HIT_REVIEW_CURSOR"
   --resolution "$HIT_REVIEW_RESOLUTION"
   --max-out-size "$HIT_REVIEW_MAX_OUT_SIZE"
   --render
@@ -101,9 +110,6 @@ if [[ -n "${MAGI_TARGET:-}" ]]; then
 fi
 if [[ -n "${HIT_REVIEW_OUT:-}" ]]; then
   ARGS+=(--out-dir "$HIT_REVIEW_OUT")
-fi
-if [[ -n "${HIT_REVIEW_STATE:-}" ]]; then
-  ARGS+=(--state "$HIT_REVIEW_STATE")
 fi
 if [[ -n "${HIT_REVIEW_BACKEND:-}" ]]; then
   ARGS+=(--backend "$HIT_REVIEW_BACKEND")
@@ -125,7 +131,7 @@ else
   ARGS+=(--telegram)
 fi
 
-log "starting hit review: replays=$REPLAY_DIR limit=$HIT_REVIEW_LIMIT resolution=$HIT_REVIEW_RESOLUTION"
+log "starting hit review: replays=$REPLAY_DIR limit=$HIT_REVIEW_LIMIT cursor=$HIT_REVIEW_CURSOR resolution=$HIT_REVIEW_RESOLUTION"
 
 # "$@" lets cron/manual runs add --force, --all, --deaths-only, etc.
 "$NPX_BIN" --no-install tsx src/hit-review-cli.ts "${ARGS[@]}" "$@"

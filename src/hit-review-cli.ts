@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
- * Hit review pipeline: find the moments the configured player got hit, render
- * the best/most costly ones to MP4, and optionally send them to Telegram.
+ * Hit review pipeline: walk replay history chronologically, render the next
+ * opening hits taken or landed conversions to MP4, and optionally send them to
+ * Telegram.
  *
  * Usage:
- *   npx tsx src/hit-review-cli.ts --dir ~/Slippi --target POOK#392 --json
- *   npx tsx src/hit-review-cli.ts --dir ~/Slippi --limit 5 --render --telegram
+ *   npx tsx src/hit-review-cli.ts --dir ~/Slippi --target POOK#392 --chronological --json
+ *   npx tsx src/hit-review-cli.ts --dir ~/Slippi --chronological --limit 2 --render --telegram
  *   npx tsx src/hit-review-cli.ts --telegram-check
  */
 
@@ -18,9 +19,14 @@ import path from "node:path";
 import { resolveReplayFolder, resolveTarget } from "./config.js";
 import {
   extractHitReview,
+  extractReviewEvents,
   formatHitReviewCaption,
   HitReviewTargetError,
+  isReviewEventAfterPoint,
+  reviewEventAtMs,
+  reviewEventKey,
   selectHitSequences,
+  type HitReviewCursorPoint,
   type HitReviewSequence,
 } from "./hitReview.js";
 import { DEFAULT_MAX_OUT_SIZE, enforceOutputLimit, parseByteSize, type RetentionResult } from "./outputRetention.js";
@@ -41,6 +47,9 @@ interface CliArgs {
   limit: number;
   minDamage: number | null;
   deathsOnly: boolean;
+  chronological: boolean;
+  cursorPath: string;
+  resetCursor: boolean;
   json: boolean;
   render: boolean;
   outDir: string | null;
@@ -86,13 +95,36 @@ interface HitReviewState {
   delivered: Record<string, string>;
 }
 
+interface ReviewCacheEntry {
+  size: number;
+  mtimeMs: number;
+  events: HitReviewSequence[];
+}
+
+interface ReviewCursor {
+  version: 1;
+  cacheVersion: number;
+  target: string;
+  lastClipAt: string | null;
+  lastClipKey: string | null;
+  lastClip: {
+    kind: string;
+    replayPath: string;
+    firstHitFrame: number;
+    lastHitFrame: number;
+  } | null;
+  updatedAt: string;
+  cache: Record<string, ReviewCacheEntry>;
+}
+
 interface ClipOutput {
   path: string;
   sequence: HitReviewSequence;
 }
 
-const DEFAULT_LIMIT = 5;
+const DEFAULT_LIMIT = 2;
 const DEFAULT_SINCE_HOURS = 48;
+const REVIEW_CACHE_VERSION = 1;
 const DELIVERED_RETENTION_DAYS = 60;
 const TELEGRAM_SEND_INTERVAL_MS = 1200;
 
@@ -108,9 +140,12 @@ Replay input:
 
 Selection:
   --target TAG|CODE     Player to review (default: MAGI config or MAGI_TARGET)
-  --limit N             Clips to render/send, ranked by cost (default: ${DEFAULT_LIMIT}; 0 = all)
-  --min-damage N        Ignore sequences below this damage
-  --deaths-only         Only sequences that took a stock
+  --limit N             Clips to render/send (default: ${DEFAULT_LIMIT}; 0 = all)
+  --min-damage N        Ignore events whose full conversion is below this damage
+  --deaths-only         Only events whose conversion took a stock
+  --chronological       Daily review mode: next N events after the cursor, in
+                        time order. Events are an opening hit taken (5s before)
+                        or a landed conversion (5s after your last hit).
 
 Output:
   --json                Print the selected sequences as JSON (progress goes to stderr)
@@ -129,11 +164,14 @@ Telegram:
   --telegram-check      Print the bot identity and recently seen chat ids, then exit
 
 State:
-  --state PATH          State file (default: ~/.magi-melee/hit-review-state.json)
-  --since-hours N       On a fresh state, only scan files newer than N hours (default: ${DEFAULT_SINCE_HOURS}; 0 = all)
-  --all                 Process every discovered replay, regardless of state/age
-  --force               Reprocess replays and resend clips already marked delivered
-  --no-state            Do not read or write state (will reprocess on every run)
+  --state PATH          Legacy cost-ranked state file (default: ~/.magi-melee/hit-review-state.json)
+  --since-hours N       Legacy cost-ranked mode: on a fresh state, only scan files newer than N hours
+                        (default: ${DEFAULT_SINCE_HOURS}; 0 = all)
+  --all                 Legacy cost-ranked mode: process every discovered replay, regardless of state/age
+  --force               Reprocess/resend; in chronological mode, ignore the cursor for selection
+  --no-state            Legacy cost-ranked mode: do not read or write state
+  --cursor PATH         Chronological cursor file (default: ./data/hit-review-cursor.json)
+  --reset-cursor        Ignore the saved cursor for this run; it advances after the first success
   --verbose             Print per-replay detail
 
 Environment:
@@ -152,6 +190,9 @@ function parseArgs(argv: string[]): CliArgs {
     limit: DEFAULT_LIMIT,
     minDamage: null,
     deathsOnly: false,
+    chronological: false,
+    cursorPath: path.resolve(process.cwd(), "data", "hit-review-cursor.json"),
+    resetCursor: false,
     json: false,
     render: false,
     outDir: null,
@@ -218,6 +259,17 @@ function parseArgs(argv: string[]): CliArgs {
         break;
       case "--deaths-only":
         args.deathsOnly = true;
+        i++;
+        break;
+      case "--chronological":
+        args.chronological = true;
+        i++;
+        break;
+      case "--cursor":
+        args.cursorPath = path.resolve(expandHome(takeValue()));
+        break;
+      case "--reset-cursor":
+        args.resetCursor = true;
         i++;
         break;
       case "--json":
@@ -317,6 +369,11 @@ async function main(): Promise<void> {
       );
     }
     args.dirs.push(configuredFolder);
+  }
+
+  if (args.chronological) {
+    await runChronological(args, target);
+    return;
   }
 
   const state = args.noState ? emptyState() : loadState(args.statePath);
@@ -523,6 +580,370 @@ async function main(): Promise<void> {
   if (renderFailures > 0 || sendFailures > 0) process.exitCode = 1;
 }
 
+async function runChronological(args: CliArgs, target: string): Promise<void> {
+  let cursor = loadReviewCursor(args.cursorPath, target);
+  if (args.resetCursor) {
+    if (cursor.lastClipAt) log(`Ignoring saved cursor at ${cursor.lastClipAt}.`);
+    cursor.lastClipAt = null;
+    cursor.lastClipKey = null;
+    cursor.lastClip = null;
+  }
+  const cursorPoint = reviewCursorPoint(cursor);
+  log(
+    cursorPoint
+      ? `Chronological cursor: ${new Date(cursorPoint.atMs).toISOString()} (${cursorPoint.key})`
+      : "Chronological cursor: starting at the oldest event.",
+  );
+
+  const candidates = collectCandidates(args);
+  const games: AnalyzedGame[] = [];
+  const errors: string[] = [];
+  let targetErrors = 0;
+  let cachedFiles = 0;
+  let parsedFiles = 0;
+
+  for (const candidate of candidates) {
+    const cached = cursor.cache[candidate.path];
+    if (cached && cached.size === candidate.size && cached.mtimeMs === candidate.mtimeMs) {
+      games.push({ candidate, sequences: cached.events });
+      cachedFiles++;
+      if (args.verbose) log(`  ${path.basename(candidate.path)}: ${cached.events.length} cached review event(s)`);
+      continue;
+    }
+
+    try {
+      const result = processGame(candidate.path, games.length + 1);
+      const sequences = extractReviewEvents(result, target, candidate.path);
+      games.push({ candidate, sequences });
+      cursor.cache[candidate.path] = {
+        size: candidate.size,
+        mtimeMs: candidate.mtimeMs,
+        events: sequences,
+      };
+      parsedFiles++;
+      log(`  ${path.basename(candidate.path)}: ${sequences.length} review event(s)`);
+    } catch (err) {
+      if (err instanceof HitReviewTargetError) targetErrors++;
+      const message = errorMessage(err);
+      errors.push(`${path.basename(candidate.path)}: ${message}`);
+      log(`  skipped ${path.basename(candidate.path)}: ${message}`);
+    }
+  }
+
+  if (games.length === 0) {
+    if (targetErrors > 0) {
+      throw new HitReviewTargetError(
+        `Target player "${target}" was not found in any replay (${targetErrors} target error(s)). Check the tag/connect code.`,
+      );
+    }
+    if (errors.length > 0) throw new Error(`No replay could be analyzed. First error: ${errors[0]}`);
+  }
+
+  log(
+    `${candidates.length} replay(s) found; ${cachedFiles} cached, ${parsedFiles} analyzed, ` +
+      `${errors.length} skipped.`,
+  );
+
+  let telegramConfig: TelegramConfig | null = null;
+  if (args.telegram && !args.dryRun) {
+    telegramConfig = telegramConfigFromEnv({ chatId: args.telegramChat });
+  }
+
+  const renderScript = findRenderScript();
+  if ((args.render || args.telegram) && !args.dryRun && !fs.existsSync(renderScript)) {
+    throw new Error(`Render script not found: ${renderScript}`);
+  }
+
+  const mtimeByPath = new Map(games.map((game) => [game.candidate.path, game.candidate.mtimeMs]));
+  const eventMoment = (sequence: HitReviewSequence): number =>
+    reviewEventAtMs(sequence, mtimeByPath.get(sequence.replayPath) ?? 0);
+
+  const allEvents = games.flatMap((game) => game.sequences);
+  const afterCursor = allEvents.filter(
+    (sequence) =>
+      args.force ||
+      cursorPoint === null ||
+      isReviewEventAfterPoint(sequence, cursorPoint, mtimeByPath.get(sequence.replayPath) ?? 0),
+  );
+  const filtered = afterCursor.filter((sequence) => {
+    if (args.deathsOnly && !sequence.didKill) return false;
+    if (args.minDamage !== null) {
+      const damage = sequence.conversion?.damage ?? sequence.damage;
+      if (damage < args.minDamage) return false;
+    }
+    return true;
+  });
+  filtered.sort((a, b) => eventMoment(a) - eventMoment(b) || reviewEventKey(a).localeCompare(reviewEventKey(b)));
+  const selected = args.limit > 0 ? filtered.slice(0, args.limit) : filtered;
+
+  log(
+    `Found ${allEvents.length} review event(s); ${afterCursor.length} after the cursor; selected ${selected.length}.`,
+  );
+
+  const outDir = path.resolve(expandHome(args.outDir ?? path.join(os.homedir(), ".magi-melee", "hit-review")));
+  const clips: ClipOutput[] = [];
+  let renderFailures = 0;
+  let sendFailures = 0;
+  let sent = 0;
+  let rendered = 0;
+  let retention: RetentionResult | null = null;
+
+  const runsPipeline = args.render || args.telegram;
+  if (!runsPipeline) {
+    const payload = chronologicalPayload(
+      args,
+      target,
+      candidates,
+      games,
+      cachedFiles,
+      parsedFiles,
+      allEvents,
+      afterCursor,
+      selected,
+      clips,
+      cursor,
+      retention,
+      errors,
+    );
+    if (args.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    else log("Pass --render to produce MP4s or --telegram to render and send them.");
+    return;
+  }
+
+  if (!args.dryRun) persistReviewCursor(args.cursorPath, cursor);
+
+  log(`Output directory: ${outDir}`);
+  if (args.telegram) log(`Telegram destination: chat ${telegramConfig?.chatId ?? "(dry run)"}`);
+
+  for (const sequence of selected) {
+    const clipPath = path.join(outDir, clipFileName(sequence));
+
+    if (args.dryRun) {
+      log(
+        `[dry-run] would render ${path.basename(sequence.replayPath)} frames ` +
+          `${sequence.clipStartFrame}-${sequence.clipEndFrame} -> ${clipPath}`,
+      );
+      clips.push({ path: clipPath, sequence });
+      continue;
+    }
+
+    try {
+      fs.mkdirSync(outDir, { recursive: true });
+      renderClip(sequence, clipPath, args, renderScript);
+      writeClipMetadata(clipPath, sequence);
+      rendered++;
+      clips.push({ path: clipPath, sequence });
+      log(`  rendered ${path.basename(clipPath)}`);
+    } catch (err) {
+      renderFailures++;
+      log(
+        `  render failed for ${path.basename(sequence.replayPath)} frames ` +
+          `${sequence.clipStartFrame}-${sequence.clipEndFrame}: ${errorMessage(err)}`,
+      );
+      break;
+    }
+
+    if (args.telegram && telegramConfig) {
+      try {
+        await sendTelegramVideo(telegramConfig, clipPath, formatHitReviewCaption(sequence));
+        sent++;
+      } catch (err) {
+        sendFailures++;
+        log(`  Telegram send failed: ${errorMessage(err)}`);
+        break;
+      }
+      await sleep(TELEGRAM_SEND_INTERVAL_MS);
+    }
+
+    cursor = cursorAfterEvent(cursor, sequence, eventMoment(sequence));
+    persistReviewCursor(args.cursorPath, cursor);
+  }
+
+  if (!args.dryRun && args.maxOutBytes > 0) {
+    retention = enforceOutputLimit(outDir, args.maxOutBytes, { onError: log });
+    if (retention.removed > 0) {
+      log(
+        `Pruned ${retention.removed} old clip/sidecar file(s), freed ${formatBytes(retention.freedBytes)}; ` +
+          `${formatBytes(retention.remainingBytes)} remains (limit ${formatBytes(args.maxOutBytes)}).`,
+      );
+    } else if (retention.remainingBytes > args.maxOutBytes) {
+      log(
+        `Warning: ${formatBytes(retention.remainingBytes)} of clips remain, above the ` +
+          `${formatBytes(args.maxOutBytes)} limit; prune manually if deletion was blocked.`,
+      );
+    }
+  }
+
+  const payload = chronologicalPayload(
+    args,
+    target,
+    candidates,
+    games,
+    cachedFiles,
+    parsedFiles,
+    allEvents,
+    afterCursor,
+    selected,
+    clips,
+    cursor,
+    retention,
+    errors,
+  );
+  if (args.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+  else {
+    log(
+      `Done: ${rendered} rendered, ${sent} sent, ${renderFailures} render failure(s), ` +
+        `${sendFailures} send failure(s).`,
+    );
+  }
+  if (renderFailures > 0 || sendFailures > 0) process.exitCode = 1;
+}
+
+function chronologicalPayload(
+  args: CliArgs,
+  target: string,
+  candidates: Candidate[],
+  games: AnalyzedGame[],
+  cachedFiles: number,
+  parsedFiles: number,
+  allEvents: HitReviewSequence[],
+  afterCursor: HitReviewSequence[],
+  selected: HitReviewSequence[],
+  clips: ClipOutput[],
+  cursor: ReviewCursor,
+  retention: RetentionResult | null,
+  errors: string[],
+): Record<string, unknown> {
+  return {
+    target,
+    mode: "chronological",
+    filesScanned: candidates.length,
+    filesCached: cachedFiles,
+    filesAnalyzed: parsedFiles,
+    filesWithEvents: games.filter((game) => game.sequences.length > 0).length,
+    eventsFound: allEvents.length,
+    eventsAfterCursor: afterCursor.length,
+    eventsSelected: selected,
+    clips,
+    cursor: {
+      path: args.cursorPath,
+      target: cursor.target,
+      lastClipAt: cursor.lastClipAt,
+      lastClipKey: cursor.lastClipKey,
+      lastClip: cursor.lastClip,
+      updatedAt: cursor.updatedAt,
+    },
+    outputLimitBytes: args.maxOutBytes,
+    outputBytes: retention?.remainingBytes ?? null,
+    errors,
+  };
+}
+
+function loadReviewCursor(file: string, target: string): ReviewCursor {
+  const empty = emptyReviewCursor(target);
+  if (!fs.existsSync(file)) return empty;
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<ReviewCursor> & {
+      cache?: unknown;
+    };
+    if (parsed.target !== target) {
+      log(`Cursor target changed from "${parsed.target ?? "unknown"}" to "${target}"; starting fresh.`);
+      return empty;
+    }
+    if (
+      typeof parsed.lastClipAt === "string" &&
+      Number.isFinite(Date.parse(parsed.lastClipAt)) &&
+      typeof parsed.lastClipKey === "string"
+    ) {
+      empty.lastClipAt = parsed.lastClipAt;
+      empty.lastClipKey = parsed.lastClipKey;
+    }
+    if (
+      parsed.lastClip &&
+      typeof parsed.lastClip === "object" &&
+      typeof parsed.lastClip.kind === "string" &&
+      typeof parsed.lastClip.replayPath === "string" &&
+      typeof parsed.lastClip.firstHitFrame === "number" &&
+      typeof parsed.lastClip.lastHitFrame === "number"
+    ) {
+      empty.lastClip = parsed.lastClip;
+    }
+    if (typeof parsed.updatedAt === "string") empty.updatedAt = parsed.updatedAt;
+
+    if (
+      parsed.cacheVersion === REVIEW_CACHE_VERSION &&
+      parsed.cache &&
+      typeof parsed.cache === "object" &&
+      !Array.isArray(parsed.cache)
+    ) {
+      for (const [replayPath, entry] of Object.entries(parsed.cache as Record<string, unknown>)) {
+        if (!entry || typeof entry !== "object") continue;
+        const candidate = entry as Partial<ReviewCacheEntry>;
+        if (
+          typeof candidate.size !== "number" ||
+          typeof candidate.mtimeMs !== "number" ||
+          !Array.isArray(candidate.events)
+        ) {
+          continue;
+        }
+        empty.cache[replayPath] = {
+          size: candidate.size,
+          mtimeMs: candidate.mtimeMs,
+          events: candidate.events as HitReviewSequence[],
+        };
+      }
+    }
+    return empty;
+  } catch (err) {
+    log(`Warning: could not read cursor file ${file} (${errorMessage(err)}); starting fresh.`);
+    return empty;
+  }
+}
+
+function emptyReviewCursor(target: string): ReviewCursor {
+  return {
+    version: 1,
+    cacheVersion: REVIEW_CACHE_VERSION,
+    target,
+    lastClipAt: null,
+    lastClipKey: null,
+    lastClip: null,
+    updatedAt: new Date(0).toISOString(),
+    cache: {},
+  };
+}
+
+function reviewCursorPoint(cursor: ReviewCursor): HitReviewCursorPoint | null {
+  if (!cursor.lastClipAt || !cursor.lastClipKey) return null;
+  const atMs = Date.parse(cursor.lastClipAt);
+  if (!Number.isFinite(atMs)) return null;
+  return { atMs, key: cursor.lastClipKey };
+}
+
+function cursorAfterEvent(cursor: ReviewCursor, sequence: HitReviewSequence, atMs: number): ReviewCursor {
+  return {
+    ...cursor,
+    lastClipAt: new Date(Math.floor(atMs)).toISOString(),
+    lastClipKey: reviewEventKey(sequence),
+    lastClip: {
+      kind: sequence.kind,
+      replayPath: sequence.replayPath,
+      firstHitFrame: sequence.firstHitFrame,
+      lastHitFrame: sequence.lastHitFrame,
+    },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function persistReviewCursor(file: string, cursor: ReviewCursor): void {
+  cursor.updatedAt = new Date().toISOString();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(temporary, `${JSON.stringify(cursor, null, 2)}\n`);
+  fs.renameSync(temporary, file);
+}
+
 async function runTelegramCheck(args: CliArgs): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) {
@@ -680,7 +1101,14 @@ function clipFileName(sequence: HitReviewSequence): string {
     .replace(/[^a-zA-Z0-9._-]+/g, "_")
     .slice(0, 60);
   const hash = createHash("sha1").update(sequence.replayPath).digest("hex").slice(0, 8);
-  const label = sequence.didKill ? "death" : "hit";
+  const label =
+    sequence.kind === "opening-hit-taken"
+      ? "opening"
+      : sequence.kind === "conversion-landed"
+        ? "conversion"
+        : sequence.didKill
+          ? "death"
+          : "hit";
   return `${stem}-${hash}-${label}-${sequence.firstHitFrame}-${sequence.clipStartFrame}-${sequence.clipEndFrame}.mp4`;
 }
 

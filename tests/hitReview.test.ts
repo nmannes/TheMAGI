@@ -2,9 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   extractHitReview,
+  extractReviewEvents,
   findTargetSlot,
   formatHitReviewCaption,
   HitReviewTargetError,
+  isReviewEventAfterPoint,
+  reviewEventAtMs,
+  reviewEventKey,
+  reviewEventPoint,
   selectHitSequences,
   type HitReviewSequence,
 } from "../src/hitReview";
@@ -301,6 +306,225 @@ describe("extractHitReview", () => {
     expect(sequence.clipStartFrame).toBe(820);
     expect(sequence.clipEndFrame).toBe(1030);
     expect(formatHitReviewCaption(sequence)).toContain("no hit attributed");
+  });
+});
+
+describe("extractReviewEvents", () => {
+  it("emits one opening hit taken per opponent conversion, not one per follow-up hit", () => {
+    const taken = makeConversion(
+      [
+        { frame: 400, moveId: 14, damage: 10 },
+        { frame: 430, moveId: 13, damage: 5 },
+        { frame: 460, moveId: 15, damage: 7 },
+      ],
+      { startPercent: 20, endPercent: 42 },
+    );
+
+    const events = extractReviewEvents(makeGame([taken], []), "POOK#392", "/replays/game.slp");
+
+    expect(events).toHaveLength(1);
+    const event = events[0]!;
+    expect(event.kind).toBe("opening-hit-taken");
+    expect(event.hits.map((hit) => hit.frame)).toEqual([400]);
+    expect(event.damage).toBe(10);
+    expect(event.startPercent).toBe(20);
+    expect(event.endPercent).toBe(30);
+    expect(event.conversion).toMatchObject({
+      moveCount: 3,
+      damage: 22,
+      startPercent: 20,
+      endPercent: 42,
+      didKill: false,
+    });
+    expect(event.clipStartFrame).toBe(100);
+    expect(event.clipEndFrame).toBe(520);
+  });
+
+  it("emits a landed conversion only when the target connected at least two hits", () => {
+    const combo = makeConversion(
+      [
+        { frame: 700, moveId: 13, damage: 12 },
+        { frame: 730, moveId: 14, damage: 8 },
+      ],
+      { attackerSlot: 0, startPercent: 0, endPercent: 20 },
+    );
+    const singleHit = makeConversion([{ frame: 900, moveId: 11, damage: 6 }], {
+      attackerSlot: 0,
+      startPercent: 30,
+      endPercent: 36,
+    });
+
+    const events = extractReviewEvents(makeGame([combo, singleHit], []), "pook", "/replays/game.slp");
+
+    expect(events).toHaveLength(1);
+    const event = events[0]!;
+    expect(event.kind).toBe("conversion-landed");
+    expect(event.hits.map((hit) => hit.frame)).toEqual([700, 730]);
+    expect(event.damage).toBe(20);
+    expect(event.startPercent).toBe(0);
+    expect(event.endPercent).toBe(20);
+    expect(event.clipStartFrame).toBe(400);
+    expect(event.clipEndFrame).toBe(1030);
+  });
+
+  it("keeps opening hits taken and landed conversions in chronological order", () => {
+    const landed = makeConversion(
+      [
+        { frame: 100, moveId: 13, damage: 6 },
+        { frame: 130, moveId: 14, damage: 6 },
+      ],
+      { attackerSlot: 0, startPercent: 0, endPercent: 12 },
+    );
+    const taken = makeConversion([{ frame: 300, moveId: 15, damage: 9 }], {
+      startPercent: 40,
+      endPercent: 49,
+    });
+
+    const events = extractReviewEvents(makeGame([taken, landed], []), "pook", "/replays/game.slp");
+
+    expect(events.map((event) => event.kind)).toEqual(["conversion-landed", "opening-hit-taken"]);
+    expect(events.map((event) => event.firstHitFrame)).toEqual([100, 300]);
+  });
+
+  it("captions a landed conversion as a conversion, never a confirmed combo", () => {
+    const combo = makeConversion(
+      [
+        { frame: 700, moveId: 13, damage: 12 },
+        { frame: 730, moveId: 14, damage: 8 },
+      ],
+      { attackerSlot: 0, startPercent: 0, endPercent: 20 },
+    );
+
+    const caption = formatHitReviewCaption(
+      onlySequence(extractReviewEvents(makeGame([combo], []), "pook", "/replays/game.slp")),
+    );
+
+    expect(caption).toContain("Conversion landed");
+    expect(caption).toContain("20% in 2 hits");
+    expect(caption).not.toMatch(/\bcombo\b/i);
+  });
+
+  it("attributes a stock when the opening hit is the killing hit", () => {
+    const conversion = makeConversion([{ frame: 400, moveId: 54, damage: 10 }], {
+      didKill: true,
+      startPercent: 140,
+      endPercent: 150,
+      endFrame: 500,
+    });
+    const stock = makeStock({
+      stockNumber: 2,
+      endFrame: 500,
+      deathPercent: 150,
+      killerMoveId: 54,
+      verdict: "NO_DI",
+      diScore: 0.1,
+    });
+
+    const event = onlySequence(
+      extractReviewEvents(makeGame([conversion], [stock], 600), "pook", "/replays/game.slp"),
+    );
+
+    expect(event.kind).toBe("opening-hit-taken");
+    expect(event.didKill).toBe(true);
+    expect(event.death?.stockNumber).toBe(2);
+    expect(event.clipEndFrame).toBe(550);
+    expect(formatHitReviewCaption(event)).toContain("Stock 2");
+  });
+
+  it("captions the opening hit and reports the full conversion separately", () => {
+    const taken = makeConversion(
+      [
+        { frame: 400, moveId: 14, damage: 10 },
+        { frame: 430, moveId: 13, damage: 5 },
+      ],
+      { startPercent: 20, endPercent: 35 },
+    );
+
+    const caption = formatHitReviewCaption(
+      onlySequence(extractReviewEvents(makeGame([taken], []), "pook", "/replays/game.slp")),
+    );
+
+    expect(caption).toContain("Opening hit taken");
+    expect(caption).toContain("Opening: 20% → 30%");
+    expect(caption).toContain("Conversion: 2 hits, 20% → 35%");
+    expect(caption).not.toContain("Got hit");
+  });
+});
+
+describe("review cursor ordering", () => {
+  function event(overrides: Partial<HitReviewSequence> = {}): HitReviewSequence {
+    return {
+      kind: "opening-hit-taken",
+      replayPath: "/replays/a.slp",
+      gameNumber: 1,
+      startAt: "2026-11-15T10:00:00.000Z",
+      stage: "Battlefield",
+      target: { slot: 0, tag: "pook", connectCode: "POOK#392", character: "Fox" },
+      opponent: { slot: 1, tag: "rival", connectCode: "RIVAL#1", character: "Ness" },
+      clipStartFrame: 100,
+      clipEndFrame: 520,
+      firstHitFrame: 400,
+      lastHitFrame: 400,
+      timestamp: "0:06",
+      startPercent: 20,
+      endPercent: 30,
+      damage: 10,
+      moveCount: 1,
+      hits: [],
+      openingTypes: ["neutral-win"],
+      didKill: false,
+      death: null,
+      score: 0,
+      ...overrides,
+    };
+  }
+
+  it("uses the game start time plus the first-hit frame as the event instant", () => {
+    // metadata.startAt is recorded at Slippi's first replay frame (-123), not
+    // at frame 0 (when the in-game timer starts counting down).
+    expect(reviewEventAtMs(event())).toBe(Date.parse("2026-11-15T10:00:00.000Z") + ((400 + 123) / 60) * 1000);
+  });
+
+  it("places frame 0 exactly 123 frames after the recorded start time", () => {
+    expect(reviewEventAtMs(event({ firstHitFrame: 0 }))).toBe(Date.parse("2026-11-15T10:00:00.000Z") + 2.05 * 1000);
+  });
+
+  it("advances between two events inside the same replay", () => {
+    const replayPath = "/replays/same-game.slp";
+    const first = event({ replayPath, firstHitFrame: 167, lastHitFrame: 190 });
+    const point = reviewEventPoint(first);
+    const second = event({ replayPath, firstHitFrame: 581, lastHitFrame: 600 });
+
+    expect(isReviewEventAfterPoint(first, point)).toBe(false);
+    expect(isReviewEventAfterPoint(second, point)).toBe(true);
+    expect(reviewEventAtMs(second) - reviewEventAtMs(first)).toBe(((581 - 167) / 60) * 1000);
+  });
+
+  it("does not treat an event as after its own saved cursor", () => {
+    const first = event();
+    const point = reviewEventPoint(first);
+
+    expect(point.atMs).toBe(Math.floor(reviewEventAtMs(first)));
+    expect(isReviewEventAfterPoint(first, point)).toBe(false);
+  });
+
+  it("treats only strictly later events as after the cursor", () => {
+    const first = event();
+    const point = reviewEventPoint(first);
+
+    expect(isReviewEventAfterPoint(first, point)).toBe(false);
+    expect(isReviewEventAfterPoint(event({ firstHitFrame: 401 }), point)).toBe(true);
+    expect(isReviewEventAfterPoint(event({ firstHitFrame: 399 }), point)).toBe(false);
+  });
+
+  it("uses the event key to order events at the same instant", () => {
+    const first = event({ kind: "conversion-landed" });
+    const second = event({ kind: "opening-hit-taken" });
+    const point = reviewEventPoint(first);
+
+    expect(reviewEventKey(second) > reviewEventKey(first)).toBe(true);
+    expect(isReviewEventAfterPoint(second, point)).toBe(true);
+    expect(isReviewEventAfterPoint(first, point)).toBe(false);
   });
 });
 
