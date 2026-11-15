@@ -10,6 +10,9 @@ import {
   reviewEventAtMs,
   reviewEventKey,
   reviewEventPoint,
+  reviewFrameAtMs,
+  reviewReplayLastEventAtMs,
+  reviewReplayStartsAtMs,
   selectHitSequences,
   type HitReviewSequence,
 } from "../src/hitReview";
@@ -487,6 +490,25 @@ describe("review cursor ordering", () => {
 
   it("places frame 0 exactly 123 frames after the recorded start time", () => {
     expect(reviewEventAtMs(event({ firstHitFrame: 0 }))).toBe(Date.parse("2026-11-15T10:00:00.000Z") + 2.05 * 1000);
+  });
+
+  it("maps replay frames from the recorded start frame", () => {
+    const start = Date.parse("2026-11-15T10:00:00.000Z");
+    expect(reviewFrameAtMs(start, -123)).toBe(start);
+    expect(reviewFrameAtMs(start, 0)).toBe(start + 2.05 * 1000);
+  });
+
+  it("bounds a replay's last event from its metadata", () => {
+    const startAt = "2026-11-15T10:00:00.000Z";
+    expect(reviewReplayLastEventAtMs(startAt, 60)).toBe(Date.parse(startAt) + (183 / 60) * 1000);
+    expect(reviewReplayLastEventAtMs(null, 60)).toBeNull();
+    expect(reviewReplayLastEventAtMs(startAt, null)).toBeNull();
+  });
+
+  it("falls back to file mtime when a replay has no usable startAt", () => {
+    expect(reviewReplayStartsAtMs(null, 1234)).toBe(1234);
+    expect(reviewReplayStartsAtMs("not-a-date", 1234)).toBe(1234);
+    expect(reviewReplayStartsAtMs("2026-11-15T10:00:00.000Z", 1234)).toBe(Date.parse("2026-11-15T10:00:00.000Z"));
   });
 
   it("advances between two events inside the same replay", () => {

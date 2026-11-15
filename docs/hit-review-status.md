@@ -44,6 +44,15 @@ continue through tech chases and ledge traps.
 - [x] Added a parsed-event cache keyed by replay size and modification time, so
       a daily run re-parses only new or changed replays. A target change resets
       both the cursor and the cache.
+- [x] Made parsing lazy. A run reads only `startAt`/`lastFrame` metadata for
+      every replay, skips replays whose latest possible event predates the
+      cursor without parsing them, parses or restores one replay at a time, and
+      stops once `--limit` events are selected and the next replay starts after
+      the last selected event (ties still parse). On the 800-replay local
+      library a fresh-cursor query took 0.98 s, parsed 2 replays, and deferred
+      798; a mid-library cursor skipped 92 replays before the cursor and
+      deferred 707. `--json` now reports `filesSkippedBeforeCursor` and
+      `filesDeferred`.
 - [x] Anchored event instants to Slippi's real frame numbering:
       `metadata.startAt + (frame + 123) / 60`. Slippi writes `startAt` when the
       replay's first frame is recorded, and replay frames start at `-123`
@@ -85,9 +94,10 @@ Xvfb/Dolphin/ffmpeg run:
 ## What is next
 
 1. **Telegram credentials.** `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are
-   still unset. Send the bot a message, run
-   `npx tsx src/hit-review-cli.ts --telegram-check`, then put both values in
-   `key.env`.
+   set locally in `docker.env` (gitignored) and were verified with
+   `--telegram-check` plus a real text message. Clyde's `key.env` still needs
+   both values before delivery works there; `docker.env` is deliberately not
+   rsynced.
 2. **One real end-to-end run.** Render and send two clips from the real replay
    folder with a temporary cursor, then inspect the captions and the Telegram
    messages:

@@ -215,6 +215,16 @@ the most recent generated clip plus a cache of parsed events per replay. The
 cache is what makes a daily run cheap: unchanged replays are not re-parsed. If
 the configured target changes, the cursor and cache reset automatically.
 
+Parsing is lazy. A run reads only the cheap `startAt`/`lastFrame` metadata for
+every replay. It orders replays by their recorded start instant, skips any
+replay whose latest possible event is before the cursor without parsing it,
+then parses (or restores from cache) one replay at a time. Once it has
+`--limit` events, it stops as soon as the next replay starts after the last
+selected event; only a next replay starting at the same instant is parsed,
+because its events could still win the same-millisecond key tie-break. In
+`--json` output, `filesSkippedBeforeCursor` counts replays rejected by the
+cursor and `filesDeferred` counts replays never needed for the selection.
+
 ### Legacy cost-ranked mode
 
 Without `--chronological`, the CLI keeps the older behavior: it ranks the hits

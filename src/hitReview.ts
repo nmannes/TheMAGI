@@ -299,16 +299,38 @@ export function extractReviewEvents(result: GameResult, target: string, replayPa
   return events.sort((a, b) => a.firstHitFrame - b.firstHitFrame || reviewEventKey(a).localeCompare(reviewEventKey(b)));
 }
 
+/**
+ * Wall-clock instant of a replay frame. Slippi writes metadata.startAt when the
+ * Game Start event is recorded, which is the replay's first frame: -123 in
+ * Slippi's numbering (Dolphin's GAME_FIRST_FRAME, slippi-js Frames.FIRST).
+ * Frame 0 is when the in-game timer starts counting down, 123 frames later.
+ * Counting from frame 0 would place every event 2.05 seconds late.
+ */
+export function reviewFrameAtMs(startAtMs: number, frame: number): number {
+  return startAtMs + ((frame - Frames.FIRST) / FPS) * 1000;
+}
+
+/** The replay's start instant, falling back to the file's mtime when unrecorded. */
+export function reviewReplayStartsAtMs(startAt: string | null, fallbackMtimeMs = 0): number {
+  const parsed = startAt ? Date.parse(startAt) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : fallbackMtimeMs;
+}
+
+/**
+ * Latest instant any event in a replay could have. Null when the replay's
+ * metadata does not record startAt or lastFrame, in which case the replay
+ * cannot be skipped without parsing it.
+ */
+export function reviewReplayLastEventAtMs(startAt: string | null, lastFrame: number | null): number | null {
+  if (!startAt || typeof lastFrame !== "number" || !Number.isFinite(lastFrame)) return null;
+  const startAtMs = Date.parse(startAt);
+  if (!Number.isFinite(startAtMs)) return null;
+  return reviewFrameAtMs(startAtMs, lastFrame);
+}
+
 /** Wall-clock instant of an event, used by the persistent chronological cursor. */
 export function reviewEventAtMs(sequence: HitReviewSequence, fallbackMtimeMs = 0): number {
-  const parsed = sequence.startAt ? Date.parse(sequence.startAt) : Number.NaN;
-  const base = Number.isFinite(parsed) ? parsed : fallbackMtimeMs;
-  // Slippi writes metadata.startAt when the Game Start event is recorded, which
-  // is the replay's first frame: -123 in Slippi's numbering (Dolphin's
-  // GAME_FIRST_FRAME, slippi-js Frames.FIRST). Frame 0 is when the in-game
-  // timer starts counting down, 123 frames later. Counting from frame 0 would
-  // place every event 2.05 seconds late.
-  return base + ((sequence.firstHitFrame - Frames.FIRST) / FPS) * 1000;
+  return reviewFrameAtMs(reviewReplayStartsAtMs(sequence.startAt, fallbackMtimeMs), sequence.firstHitFrame);
 }
 
 /** Deterministic tie-break when two events share the same wall-clock millisecond. */

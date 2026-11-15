@@ -16,6 +16,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { SlippiGame } from "@slippi/slippi-js/node";
+
 import { resolveReplayFolder, resolveTarget } from "./config.js";
 import {
   extractHitReview,
@@ -25,6 +27,8 @@ import {
   isReviewEventAfterPoint,
   reviewEventAtMs,
   reviewEventKey,
+  reviewReplayLastEventAtMs,
+  reviewReplayStartsAtMs,
   selectHitSequences,
   type HitReviewCursorPoint,
   type HitReviewSequence,
@@ -580,6 +584,43 @@ async function main(): Promise<void> {
   if (renderFailures > 0 || sendFailures > 0) process.exitCode = 1;
 }
 
+interface ReplayBounds {
+  /** Start instant used for chronological ordering (file mtime fallback). */
+  startAtMs: number;
+  /** Latest possible event instant, or null when the replay cannot be bounded. */
+  lastEventAtMs: number | null;
+}
+
+/**
+ * Read only what is needed to order a replay and decide whether the cursor has
+ * already passed it. Cached games supply both bounds from their stored events;
+ * other games get them from Slippi metadata without a full parse.
+ */
+function replayBounds(candidate: Candidate, cached: ReviewCacheEntry | undefined): ReplayBounds {
+  if (cached && cached.size === candidate.size && cached.mtimeMs === candidate.mtimeMs && cached.events.length > 0) {
+    const startAtMs = reviewReplayStartsAtMs(cached.events[0]!.startAt, candidate.mtimeMs);
+    const lastEventAtMs = cached.events.reduce(
+      (latest, event) => Math.max(latest, reviewEventAtMs(event, candidate.mtimeMs)),
+      Number.NEGATIVE_INFINITY,
+    );
+    return { startAtMs, lastEventAtMs };
+  }
+
+  try {
+    const metadata = new SlippiGame(candidate.path).getMetadata();
+    const startAt = metadata?.startAt ?? null;
+    const lastFrame = typeof metadata?.lastFrame === "number" ? metadata.lastFrame : null;
+    return {
+      startAtMs: reviewReplayStartsAtMs(startAt, candidate.mtimeMs),
+      lastEventAtMs: reviewReplayLastEventAtMs(startAt, lastFrame),
+    };
+  } catch {
+    // Unreadable replays still go through processGame, which reports the real
+    // error. Order them by file time and never skip them.
+    return { startAtMs: candidate.mtimeMs, lastEventAtMs: null };
+  }
+}
+
 async function runChronological(args: CliArgs, target: string): Promise<void> {
   let cursor = loadReviewCursor(args.cursorPath, target);
   if (args.resetCursor) {
@@ -596,37 +637,97 @@ async function runChronological(args: CliArgs, target: string): Promise<void> {
   );
 
   const candidates = collectCandidates(args);
+  const boundsByPath = new Map<string, ReplayBounds>();
+  for (const candidate of candidates) {
+    boundsByPath.set(candidate.path, replayBounds(candidate, cursor.cache[candidate.path]));
+  }
+  // Parse in start-time order and stop once the next unparsed replay starts
+  // after the last event already selected. A daily run therefore parses only
+  // the handful of replays around the cursor, not the whole library.
+  const ordered = [...candidates].sort(
+    (a, b) => boundsByPath.get(a.path)!.startAtMs - boundsByPath.get(b.path)!.startAtMs || a.path.localeCompare(b.path),
+  );
+
   const games: AnalyzedGame[] = [];
+  const allEvents: HitReviewSequence[] = [];
   const errors: string[] = [];
   let targetErrors = 0;
   let cachedFiles = 0;
   let parsedFiles = 0;
+  let beforeCursorFiles = 0;
 
-  for (const candidate of candidates) {
-    const cached = cursor.cache[candidate.path];
-    if (cached && cached.size === candidate.size && cached.mtimeMs === candidate.mtimeMs) {
-      games.push({ candidate, sequences: cached.events });
-      cachedFiles++;
-      if (args.verbose) log(`  ${path.basename(candidate.path)}: ${cached.events.length} cached review event(s)`);
+  const mtimeByPath = new Map(candidates.map((candidate) => [candidate.path, candidate.mtimeMs]));
+  const eventMoment = (sequence: HitReviewSequence): number =>
+    reviewEventAtMs(sequence, mtimeByPath.get(sequence.replayPath) ?? 0);
+  const isAfterCursor = (sequence: HitReviewSequence): boolean =>
+    args.force ||
+    cursorPoint === null ||
+    isReviewEventAfterPoint(sequence, cursorPoint, mtimeByPath.get(sequence.replayPath) ?? 0);
+  const passesFilters = (sequence: HitReviewSequence): boolean => {
+    if (args.deathsOnly && !sequence.didKill) return false;
+    if (args.minDamage !== null) {
+      const damage = sequence.conversion?.damage ?? sequence.damage;
+      if (damage < args.minDamage) return false;
+    }
+    return true;
+  };
+
+  for (let index = 0; index < ordered.length; index++) {
+    const candidate = ordered[index]!;
+    const bounds = boundsByPath.get(candidate.path)!;
+
+    // A replay whose last possible event is already behind the cursor cannot
+    // contribute a selectable event, so it is never parsed.
+    if (
+      !args.force &&
+      cursorPoint !== null &&
+      bounds.lastEventAtMs !== null &&
+      bounds.lastEventAtMs < cursorPoint.atMs
+    ) {
+      beforeCursorFiles++;
       continue;
     }
 
-    try {
-      const result = processGame(candidate.path, games.length + 1);
-      const sequences = extractReviewEvents(result, target, candidate.path);
-      games.push({ candidate, sequences });
-      cursor.cache[candidate.path] = {
-        size: candidate.size,
-        mtimeMs: candidate.mtimeMs,
-        events: sequences,
-      };
-      parsedFiles++;
-      log(`  ${path.basename(candidate.path)}: ${sequences.length} review event(s)`);
-    } catch (err) {
-      if (err instanceof HitReviewTargetError) targetErrors++;
-      const message = errorMessage(err);
-      errors.push(`${path.basename(candidate.path)}: ${message}`);
-      log(`  skipped ${path.basename(candidate.path)}: ${message}`);
+    const cached = cursor.cache[candidate.path];
+    let sequences: HitReviewSequence[];
+    if (cached && cached.size === candidate.size && cached.mtimeMs === candidate.mtimeMs) {
+      sequences = cached.events;
+      cachedFiles++;
+      if (args.verbose) log(`  ${path.basename(candidate.path)}: ${cached.events.length} cached review event(s)`);
+    } else {
+      try {
+        const result = processGame(candidate.path, games.length + 1);
+        sequences = extractReviewEvents(result, target, candidate.path);
+        cursor.cache[candidate.path] = {
+          size: candidate.size,
+          mtimeMs: candidate.mtimeMs,
+          events: sequences,
+        };
+        parsedFiles++;
+        log(`  ${path.basename(candidate.path)}: ${sequences.length} review event(s)`);
+      } catch (err) {
+        if (err instanceof HitReviewTargetError) targetErrors++;
+        const message = errorMessage(err);
+        errors.push(`${path.basename(candidate.path)}: ${message}`);
+        log(`  skipped ${path.basename(candidate.path)}: ${message}`);
+        continue;
+      }
+    }
+
+    games.push({ candidate, sequences });
+    allEvents.push(...sequences);
+
+    if (args.limit > 0) {
+      const ready = allEvents.filter((sequence) => isAfterCursor(sequence) && passesFilters(sequence));
+      if (ready.length >= args.limit) {
+        ready.sort((a, b) => eventMoment(a) - eventMoment(b) || reviewEventKey(a).localeCompare(reviewEventKey(b)));
+        const threshold = eventMoment(ready[args.limit - 1]!);
+        const next = ordered[index + 1];
+        const nextStart = next ? boundsByPath.get(next.path)!.startAtMs : Number.POSITIVE_INFINITY;
+        // Strictly greater: an event at the next replay's start instant could
+        // still win the same-millisecond key tie-break, so parse that replay.
+        if (nextStart > threshold) break;
+      }
     }
   }
 
@@ -639,9 +740,10 @@ async function runChronological(args: CliArgs, target: string): Promise<void> {
     if (errors.length > 0) throw new Error(`No replay could be analyzed. First error: ${errors[0]}`);
   }
 
+  const deferredFiles = ordered.length - beforeCursorFiles - errors.length - games.length;
   log(
-    `${candidates.length} replay(s) found; ${cachedFiles} cached, ${parsedFiles} analyzed, ` +
-      `${errors.length} skipped.`,
+    `${candidates.length} replay(s) found; ${cachedFiles} cached, ${parsedFiles} parsed, ` +
+      `${beforeCursorFiles} before the cursor, ${errors.length} skipped, ${deferredFiles} not needed.`,
   );
 
   let telegramConfig: TelegramConfig | null = null;
@@ -654,25 +756,8 @@ async function runChronological(args: CliArgs, target: string): Promise<void> {
     throw new Error(`Render script not found: ${renderScript}`);
   }
 
-  const mtimeByPath = new Map(games.map((game) => [game.candidate.path, game.candidate.mtimeMs]));
-  const eventMoment = (sequence: HitReviewSequence): number =>
-    reviewEventAtMs(sequence, mtimeByPath.get(sequence.replayPath) ?? 0);
-
-  const allEvents = games.flatMap((game) => game.sequences);
-  const afterCursor = allEvents.filter(
-    (sequence) =>
-      args.force ||
-      cursorPoint === null ||
-      isReviewEventAfterPoint(sequence, cursorPoint, mtimeByPath.get(sequence.replayPath) ?? 0),
-  );
-  const filtered = afterCursor.filter((sequence) => {
-    if (args.deathsOnly && !sequence.didKill) return false;
-    if (args.minDamage !== null) {
-      const damage = sequence.conversion?.damage ?? sequence.damage;
-      if (damage < args.minDamage) return false;
-    }
-    return true;
-  });
+  const afterCursor = allEvents.filter(isAfterCursor);
+  const filtered = afterCursor.filter(passesFilters);
   filtered.sort((a, b) => eventMoment(a) - eventMoment(b) || reviewEventKey(a).localeCompare(reviewEventKey(b)));
   const selected = args.limit > 0 ? filtered.slice(0, args.limit) : filtered;
 
@@ -690,6 +775,9 @@ async function runChronological(args: CliArgs, target: string): Promise<void> {
 
   const runsPipeline = args.render || args.telegram;
   if (!runsPipeline) {
+    // A query-only run does not move the cursor, but keeping the parse cache
+    // makes the next preview skip the replays it just parsed.
+    if (!args.dryRun) persistReviewCursor(args.cursorPath, cursor);
     const payload = chronologicalPayload(
       args,
       target,
@@ -697,6 +785,8 @@ async function runChronological(args: CliArgs, target: string): Promise<void> {
       games,
       cachedFiles,
       parsedFiles,
+      beforeCursorFiles,
+      deferredFiles,
       allEvents,
       afterCursor,
       selected,
@@ -781,6 +871,8 @@ async function runChronological(args: CliArgs, target: string): Promise<void> {
     games,
     cachedFiles,
     parsedFiles,
+    beforeCursorFiles,
+    deferredFiles,
     allEvents,
     afterCursor,
     selected,
@@ -806,6 +898,8 @@ function chronologicalPayload(
   games: AnalyzedGame[],
   cachedFiles: number,
   parsedFiles: number,
+  beforeCursorFiles: number,
+  deferredFiles: number,
   allEvents: HitReviewSequence[],
   afterCursor: HitReviewSequence[],
   selected: HitReviewSequence[],
@@ -820,6 +914,8 @@ function chronologicalPayload(
     filesScanned: candidates.length,
     filesCached: cachedFiles,
     filesAnalyzed: parsedFiles,
+    filesSkippedBeforeCursor: beforeCursorFiles,
+    filesDeferred: deferredFiles,
     filesWithEvents: games.filter((game) => game.sequences.length > 0).length,
     eventsFound: allEvents.length,
     eventsAfterCursor: afterCursor.length,
