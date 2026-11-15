@@ -372,6 +372,7 @@ file instead; use `--all` or `--force` there.
 
 ## Related documentation
 
+- [Hit-review status and next steps](hit-review-status.md)
 - [Docker deployment](docker.md)
 - [Development notes](DEVELOPMENT.md)
 - [Melee accuracy notes](melee-accuracy.md)
