@@ -68,9 +68,14 @@ rsync -az --info=progress2 \
   --exclude site \
   --exclude screenshots \
   --exclude renders \
+  --exclude replays \
+  --exclude assets \
+  --exclude test-replays \
   --exclude dist \
   --exclude .vite \
   --exclude key.env \
+  --exclude docker.env \
+  --exclude data \
   --exclude '*.log' \
   "$ROOT_DIR/" "$HOST:$REMOTE_DIR/"
 
