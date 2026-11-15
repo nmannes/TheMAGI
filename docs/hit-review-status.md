@@ -61,6 +61,15 @@ continue through tech chases and ledge traps.
       the `-123` anchor was closer for every file.
 - [x] Kept conversion totals parser-authoritative: damage and percent ranges
       come from the conversion record, not the sum of listed move damages.
+- [x] Made chronological review the CLI's default. The earlier cost-ranked mode
+      now requires `--legacy-ranked`, and its `--state`, `--since-hours`,
+      `--all`, and `--no-state` options are rejected without it. The argument
+      parser moved to `src/hitReviewCliArgs.ts` with regression tests in
+      `tests/hitReviewCliArgs.test.ts`.
+- [x] Fixed the daily wrapper building `PATH` before sourcing `key.env`, which
+      ignored the `HIT_REVIEW_PATH` the deploy writes and could resolve a
+      system Node the project does not support (observed as npm warning about
+      Node 18.19.1 through a non-interactive SSH run).
 - [x] Made `--limit` default to 2 and added `--reset-cursor`, `--deaths-only`,
       and `--min-damage` for the chronological flow.
 - [x] Updated output retention to recognize the new `opening` and `conversion`
@@ -74,7 +83,7 @@ continue through tech chases and ledge traps.
 - [x] Added regression tests for event extraction, ordering, captions, stock
       attribution, cursor comparisons (including "not after its own cursor"),
       the `-123` frame anchor, and mid-replay cursor advancement.
-- [x] Passed the full gate: `npm run typecheck`, `npm test` (72 files, 549
+- [x] Passed the full gate: `npm run typecheck`, `npm test` (73 files, 555
       tests), `npm run lint`, `npm run format:check`, `npm run verify:docs`,
       `npm run verify:release`.
 

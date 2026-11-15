@@ -1,5 +1,10 @@
 # Release notes
 
+## 1.14.0 — 2026-11-15
+
+- Make chronological review the default for the hit-review CLI. The earlier cost-ranked selection requires `--legacy-ranked`, and its `--state`, `--since-hours`, `--all`, and `--no-state` options are rejected without it; `--chronological` remains accepted for compatibility with older scripts.
+- Fix the hit-review daily wrapper resolving `npx` before sourcing `key.env`, which ignored `HIT_REVIEW_PATH` and could run a system Node the project does not support under cron. Argument parsing now lives in `src/hitReviewCliArgs.ts` with regression tests.
+
 ## 1.13.0 — 2026-11-15
 
 - Add a headless hit-review pipeline for the replay folder. The daily job walks replay history in chronological order and renders two clips at a time: the opening hit of each opponent conversion (starting 5 seconds before the hit) or a landed conversion of at least two hits (ending 5 seconds after the player's last hit). A local gitignored cursor records the most recent clip and caches parsed events so unchanged replays are not re-parsed; each run reads only replay metadata for the whole library, skips replays that end before the cursor, and parses just enough replays to find the next two events. Optional Telegram delivery sends each clip with a caption, and a configurable output-folder cap deletes the oldest tool-created clips first.

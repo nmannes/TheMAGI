@@ -167,13 +167,13 @@ re-renders it because the replay was not marked processed.
 
 ## Usage
 
-Preview the next two chronological events without rendering:
+Chronological review is the default. Preview the next two events without
+rendering:
 
 ```bash
 npx tsx src/hit-review-cli.ts \
   --dir ~/Slippi \
   --target 'POOK#392' \
-  --chronological \
   --limit 2 --json
 ```
 
@@ -183,7 +183,6 @@ Render and send the next two events:
 npx tsx src/hit-review-cli.ts \
   --dir ~/Slippi \
   --target 'POOK#392' \
-  --chronological \
   --cursor data/hit-review-cursor.json \
   --limit 2 \
   --render --telegram
@@ -192,10 +191,13 @@ npx tsx src/hit-review-cli.ts \
 Or use the npm script:
 
 ```bash
-npm run hit-review -- --dir ~/Slippi --target 'POOK#392' --chronological --limit 2 --render
+npm run hit-review -- --dir ~/Slippi --target 'POOK#392' --limit 2 --render
 ```
 
-Useful chronological options:
+`--chronological` is still accepted for compatibility with older scripts, but
+it is no longer required.
+
+Useful options:
 
 - `--limit 2` — two clips per run; the daily wrapper sets this by default.
 - `--cursor PATH` — use a specific cursor/cache file. The default is
@@ -209,6 +211,8 @@ Useful chronological options:
 - `--limit 0` — render every event after the cursor. This can be a lot of clips.
 - `--dry-run` — print the selected events without rendering, sending, or
   changing the cursor.
+- `--legacy-ranked` — use the older cost-ranked selection instead of
+  chronological review (see below).
 
 The cursor file is local runtime state. It holds the timestamp and identity of
 the most recent generated clip plus a cache of parsed events per replay. The
@@ -227,16 +231,20 @@ cursor and `filesDeferred` counts replays never needed for the selection.
 
 ### Legacy cost-ranked mode
 
-Without `--chronological`, the CLI keeps the older behavior: it ranks the hits
-you took by damage, move count, and stock loss, and renders the top `--limit`.
-The `--state`, `--since-hours`, `--all`, and `--no-state` options belong to that
-mode. New deployments should use the chronological daily wrapper below.
+With `--legacy-ranked`, the CLI keeps the older behavior: it ranks the hits you
+took by damage, move count, and stock loss, and renders the top `--limit`. The
+`--state`, `--since-hours`, `--all`, and `--no-state` options belong to that
+mode; passing one without `--legacy-ranked` is an error so a run cannot
+silently switch selection strategies. New deployments should use the
+chronological daily wrapper below.
 
 ## Daily cron job
 
-The wrapper script loads `key.env`, takes a lock so two runs cannot overlap, and
-calls the CLI with `--chronological --limit 2 --render --telegram`. It keeps its
-cursor at `<repo>/data/hit-review-cursor.json` unless `HIT_REVIEW_CURSOR` points
+The wrapper script loads `key.env`, builds `PATH` from the optional
+`HIT_REVIEW_PATH` entry (cron does not see a user-installed Node), takes a lock
+so two runs cannot overlap, and calls the CLI with
+`--limit 2 --render --telegram`. It keeps its cursor at
+`<repo>/data/hit-review-cursor.json` unless `HIT_REVIEW_CURSOR` points
 somewhere else:
 
 ```bash

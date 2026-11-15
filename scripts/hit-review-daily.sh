@@ -35,8 +35,6 @@ cd "$ROOT_DIR"
 
 umask 077
 
-export PATH="${HIT_REVIEW_PATH:+$HIT_REVIEW_PATH:}$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
-
 log() {
   printf '[%s] %s\n' "$(date -Is)" "$*"
 }
@@ -50,6 +48,11 @@ if [[ "${HIT_REVIEW_SKIP_KEY_ENV:-0}" != "1" && -f "$KEY_ENV" ]]; then
   source "$KEY_ENV"
   set +a
 fi
+
+# Build PATH after sourcing key.env: HIT_REVIEW_PATH is usually defined there
+# (cron's PATH does not include a user-installed Node), so resolving npx first
+# would pick a system Node the project does not support.
+export PATH="${HIT_REVIEW_PATH:+$HIT_REVIEW_PATH:}$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 LOCK_FILE="${HIT_REVIEW_LOCK:-$HOME/.magi-melee/hit-review.lock}"
 mkdir -p "$(dirname "$LOCK_FILE")"
