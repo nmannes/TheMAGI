@@ -1,0 +1,291 @@
+/* ── App Shell Layout ──────────────────────────────────────────── */
+
+.app-layout {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  position: relative;
+  isolation: isolate;
+}
+
+.app-layout::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: var(--rail-width);
+  z-index: 0;
+  pointer-events: none;
+  background-image: url("../../../magimelee.svg");
+  background-repeat: no-repeat;
+  background-position: var(--magi-bg-logo-position);
+  background-size: var(--magi-bg-logo-size);
+  opacity: var(--magi-bg-logo-opacity);
+  filter: var(--magi-bg-logo-filter);
+}
+
+/* ── Sidebar — fixed icon rail ─────────────────────────────────── */
+
+.sidebar {
+  position: relative;
+  width: var(--rail-width);
+  background: var(--sidebar-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  -webkit-app-region: drag;
+  z-index: 10;
+  flex-shrink: 0;
+  overflow: visible;
+  transition: width 0.3s var(--ease-spring);
+}
+
+/* ── Navigation — icon-only squares ────────────────────────────── */
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 12px 12px;
+  flex: 1;
+  -webkit-app-region: no-drag;
+}
+
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  height: 44px;
+  padding: 0 16px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+  overflow: hidden;
+}
+
+.nav-item:hover {
+  background: var(--sidebar-hover);
+  color: var(--text);
+}
+
+.nav-item.active {
+  color: var(--accent);
+}
+
+/* Active indicator is the framer layoutId pill + accent text color.
+   (No static ::before bar — it duplicated the pill.) */
+
+.nav-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* ── Nav Label — Inline now ──────────────────────── */
+
+.nav-label {
+  margin-left: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* ── Nav Icon ──────────────────────────────────────────────────── */
+
+.nav-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+
+.nav-item:hover .nav-icon {
+  opacity: 0.85;
+}
+.nav-item.active .nav-icon {
+  opacity: 1;
+}
+
+/* ── Main Content ──────────────────────────────────────────────── */
+
+.main-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 40px;
+  z-index: 1;
+  position: relative;
+  background: transparent;
+  transition: background-color 0.15s ease;
+  /* Cap content width on ultrawide displays. NOTE: do NOT use margin-inline:auto
+     here — on a flex:1 item, auto inline margins absorb the free space that
+     flex-grow needs, collapsing this column to content width and breaking the
+     auto-fill card grids. max-width alone caps growth without that side effect. */
+  max-width: 1600px;
+}
+
+/* Subtle dot-grid background texture & animated gradient mesh */
+.main-content::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(circle at 15% 50%, rgba(var(--accent-rgb), 0.05), transparent 25%),
+    radial-gradient(circle at 85% 30%, rgba(var(--blue-rgb, 99, 102, 241), 0.04), transparent 25%),
+    radial-gradient(circle, var(--border-subtle) 1px, transparent 1px);
+  background-size:
+    100% 100%,
+    100% 100%,
+    24px 24px;
+  pointer-events: none;
+  opacity: 0.8;
+  z-index: 0;
+  animation: meshPan 20s ease-in-out infinite alternate;
+}
+
+@keyframes meshPan {
+  0% {
+    background-position:
+      0% 0%,
+      100% 100%,
+      0 0;
+  }
+  100% {
+    background-position:
+      10% 10%,
+      90% 90%,
+      0 0;
+  }
+}
+.main-content > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Scrollbar — neutral ───────────────────────────────────────── */
+
+.main-content::-webkit-scrollbar {
+  width: 4px;
+}
+.main-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+.main-content::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 2px;
+}
+.main-content::-webkit-scrollbar-thumb:hover {
+  background: var(--border-muted);
+}
+
+/* ── Kill all legacy decorations ───────────────────────────────── */
+
+.neural-mesh,
+.hex-grid,
+.scan-line,
+.particle-field,
+.particle,
+.logo-orbit,
+.logo-orbit-1,
+.logo-orbit-2,
+.logo-orbit-3,
+.logo-glow,
+.logo-wordmark,
+.logo-subtitle,
+.system-status {
+  display: none;
+}
+
+.system-status::before {
+  display: none;
+}
+
+/* ── Brand logo home link ──────────────────────────────────────────
+   Transparent click target anchored at the same origin the absolutely
+   positioned .magi-brand-logo resolves against (top/left 0). The logo's
+   own top:12/left:10 stays unchanged visually; its pointer-events:none
+   lets clicks pass through to this button. */
+
+.magi-brand-home {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 200px;
+  height: 64px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  z-index: 21;
+  -webkit-app-region: no-drag;
+}
+
+/* ── Sidebar command-palette hint ──────────────────────────────────── */
+
+.sidebar-search-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.sidebar-search-hint:hover {
+  color: var(--text);
+  background: var(--sidebar-hover);
+  border-color: var(--border-muted);
+}
+
+.sidebar-search-hint-label {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Play is a primary destination, above the analysis navigation. */
+.nav-play-feature {
+  padding: 0 0 16px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.liquid-shell .nav-item.nav-item-play {
+  background: var(--accent-muted);
+  border: 1px solid var(--border-muted);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+  font-weight: 700;
+}
+.liquid-shell .nav-item.nav-item-play:hover {
+  background: var(--sidebar-active-bg);
+  border-color: var(--accent);
+}

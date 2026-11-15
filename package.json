@@ -1,0 +1,183 @@
+{
+  "name": "magi-melee",
+  "version": "1.13.0",
+  "description": "Local-first Melee replay analysis, live Play Mode, and optional AI coaching",
+  "main": "src/main/entry.js",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "build:renderer": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p tsconfig.renderer.json",
+    "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && vite build && electron-builder --publish never",
+    "build:win": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && vite build && electron-builder --win --publish never",
+    "build:mac": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && vite build && electron-builder --mac --publish never",
+    "build:linux": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && vite build && electron-builder --linux --publish never",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "hit-review": "tsx src/hit-review-cli.ts",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx}\"",
+    "verify:release": "node scripts/verify-release.cjs",
+    "verify:docs": "node scripts/verify-docs.cjs",
+    "backfill": "node scripts/backfill.js"
+  },
+  "keywords": [
+    "melee",
+    "slippi",
+    "coaching",
+    "ai",
+    "smash-bros"
+  ],
+  "author": {
+    "name": "Bloodshed-Rain",
+    "email": "268419293+Bloodshed-Rain@users.noreply.github.com"
+  },
+  "license": "MIT",
+  "type": "commonjs",
+  "build": {
+    "appId": "com.magi-melee.app",
+    "productName": "MAGI",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/main/entry.js",
+      "dist/main/**/*",
+      "dist/renderer/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/icon.png",
+        "to": "."
+      },
+      {
+        "from": "build/icon.ico",
+        "to": "."
+      },
+      {
+        "from": "build/splash.html",
+        "to": "."
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "artifactName": "MAGI-${version}-${arch}.${ext}",
+      "icon": "build/icon.icns",
+      "category": "public.app-category.utilities"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "MAGI-${version}.${ext}",
+      "icon": "build/icon.png",
+      "category": "Utility"
+    },
+    "nsis": {
+      "artifactName": "MAGI-Setup-${version}.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "portable": {
+      "artifactName": "MAGI-${version}.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Bloodshed-Rain",
+      "repo": "TheMAGI"
+    }
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@slippi/slippi-js": "^9.0.0",
+    "@tanstack/react-query": "^5.95.2",
+    "better-sqlite3": "^12.8.0",
+    "chokidar": "^5.0.0",
+    "electron-updater": "^6.8.9",
+    "framer-motion": "^12.38.0",
+    "jose": "^6.2.13",
+    "koffi": "^2.16.2",
+    "lucide-react": "^1.7.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.18.2",
+    "recharts": "^3.8.0",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^41.0.2",
+    "electron-builder": "^26.8.1",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.26",
+    "prettier": "^3.8.1",
+    "sharp": "^0.35.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.1",
+    "vite": "^7.3.2",
+    "vitest": "^4.1.0"
+  },
+  "overrides": {
+    "esbuild": "^0.28.2"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.8.0": true,
+    "electron@41.10.7": true,
+    "electron-winstaller@5.4.0": true,
+    "esbuild@0.28.2": true,
+    "koffi@2.16.2": true
+  }
+}

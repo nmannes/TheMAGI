@@ -1,0 +1,91 @@
+/* ══════════════════════════════════════════════════════════════════
+   MAGI — Typography
+   Display font for headings, monospace for data, uppercase labels.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Base Headings ─────────────────────────────────────────────── */
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+  color: var(--text);
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+
+h1 { font-size: 22px; font-weight: 700; }
+h2 { font-size: 16px; font-weight: 700; letter-spacing: 2px; }
+h3 { font-size: 13px; font-weight: 600; color: var(--text-secondary); letter-spacing: 1px; }
+
+/* ── Page Header — Left accent bar ─────────────────────────────── */
+
+.page-header {
+  margin-bottom: 28px;
+  padding-left: 14px;
+  border-left: 3px solid var(--accent);
+}
+
+.page-header h1 {
+  font-size: 18px;
+  font-weight: 700;
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--text);
+  line-height: 1.1;
+}
+
+.page-header p {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  margin-top: 4px;
+  text-transform: uppercase;
+}
+
+/* ── Analysis Text (Markdown Coaching Output) ──────────────────── */
+
+.analysis-text {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--text);
+}
+
+.analysis-text h1,
+.analysis-text h2,
+.analysis-text h3 {
+  margin-top: 20px;
+  margin-bottom: 8px;
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+
+.analysis-text h1 { font-size: 16px; font-weight: 700; color: var(--text); }
+.analysis-text h2 { font-size: 14px; font-weight: 700; color: var(--text); letter-spacing: 2px; }
+.analysis-text h3 { font-size: 13px; font-weight: 600; color: var(--text-secondary); letter-spacing: 1px; }
+
+.analysis-text p { margin-bottom: 12px; }
+
+.analysis-text strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.analysis-text ul, .analysis-text ol {
+  padding-left: 20px;
+  margin-bottom: 12px;
+}
+
+.analysis-text li { margin-bottom: 6px; }
+
+.analysis-text code {
+  font-family: var(--font-mono);
+  background: var(--surface-2);
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  font-size: 12px;
+  color: var(--accent);
+  border: 1px solid var(--border);
+}

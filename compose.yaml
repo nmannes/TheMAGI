@@ -1,0 +1,25 @@
+name: magi-hit-review
+
+services:
+  hit-review:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: magi-hit-review:local
+    init: true
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    env_file:
+      - path: docker.env
+        required: false
+    environment:
+      REPLAY_DIR: /replays
+      ASSETS_DIR: /assets
+      HIT_REVIEW_OUT: /data/hit-review
+      HIT_REVIEW_STATE: /data/hit-review-state.json
+    volumes:
+      - "${HOST_REPLAYS_DIR:-./replays}:/replays:ro"
+      - "${HOST_ASSETS_DIR:-./assets}:/assets:ro"
+      - "${HOST_DATA_DIR:-./data}:/data"
+    shm_size: "1gb"
+    security_opt:
+      - no-new-privileges:true
