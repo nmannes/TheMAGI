@@ -74,7 +74,7 @@ continue through tech chases and ledge traps.
 - [x] Added regression tests for event extraction, ordering, captions, stock
       attribution, cursor comparisons (including "not after its own cursor"),
       the `-123` frame anchor, and mid-replay cursor advancement.
-- [x] Passed the full gate: `npm run typecheck`, `npm test` (72 files, 546
+- [x] Passed the full gate: `npm run typecheck`, `npm test` (72 files, 549
       tests), `npm run lint`, `npm run format:check`, `npm run verify:docs`,
       `npm run verify:release`.
 
@@ -91,34 +91,41 @@ Xvfb/Dolphin/ffmpeg run:
   which is the mid-game behavior the cursor is meant to have. The second run
   also reused the parsed-event cache.
 
+### End-to-end delivery (verified 2026-11-15)
+
+A headless run against the real 800-replay library rendered and delivered
+clips to Telegram. The first run read metadata for all 800 replays, parsed 2,
+deferred 798, and selected the first two events of
+`Game_20260213T235334.slp`:
+
+- Opening hit at frame 350: 7.8 MiB MP4, sent.
+- Landed conversion at frame 424: 12 MiB MP4, rendered but the upload failed
+  with a transient `fetch failed`. The cursor advanced only to the opening hit
+  (frame 350), so the failed event stayed eligible.
+
+A second run reused the cache (1 cached, 0 parsed, 1 replay before the
+cursor), selected the failed conversion again plus the next opening hit
+(frame 561), and sent both: `2 rendered, 2 sent, 0 send failure(s)`. The
+cursor advanced to frame 561 inside the same replay. This confirms the
+retry-on-failure behavior: a failed render or send is retried by the next run
+because the cursor only moves after delivery succeeds.
+
 ## What is next
 
-1. **Telegram credentials.** `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are
-   set locally in `docker.env` (gitignored) and were verified with
-   `--telegram-check` plus a real text message. Clyde's `key.env` still needs
-   both values before delivery works there; `docker.env` is deliberately not
-   rsynced.
-2. **One real end-to-end run.** Render and send two clips from the real replay
-   folder with a temporary cursor, then inspect the captions and the Telegram
-   messages:
-
-   ```bash
-   npx tsx src/hit-review-cli.ts \
-     --dir ~/Slippi --target 'POOK#392' \
-     --chronological --cursor data/hit-review-cursor.json \
-     --limit 2 --render --telegram
-   ```
-
-3. **Deploy to clyde.** Sync source/assets/replays with
-   `scripts/deploy-clyde.sh`, confirm the new chronological smoke query passes,
+1. **Telegram credentials on clyde.** Locally they live in `docker.env`
+   (gitignored) and were verified with `--telegram-check` plus real messages.
+   Clyde's `key.env` still needs `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`;
+   `docker.env` is deliberately not rsynced.
+2. **Deploy to clyde.** Sync source/assets/replays with
+   `scripts/deploy-clyde.sh`, confirm the chronological smoke query passes,
    then do one server-side dry run before any real render.
-4. **Enable the schedule.** Install cron or the systemd timer described in
-   [the daily job section](hit-review.md#daily-cron-job) only after the real run
-   succeeds.
-5. **Docker verification.** Build the image and run the same two-clip query
+3. **Enable the schedule.** Install cron or the systemd timer described in
+   [the daily job section](hit-review.md#daily-cron-job) only after the deploy
+   is verified.
+4. **Docker verification.** Build the image and run the same two-clip query
    with real mounts, since the container path now defaults to
    `/data/hit-review-cursor.json`.
-6. **Decide on the legacy mode.** The cost-ranked mode (`hit`/`death` labels,
+5. **Decide on the legacy mode.** The cost-ranked mode (`hit`/`death` labels,
    `--state`, `--since-hours`, `--all`) still exists for manual use. Remove it
    once the chronological job has run for a while.
 
