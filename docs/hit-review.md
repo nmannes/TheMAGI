@@ -65,8 +65,11 @@ enough; do not run `npx electron-rebuild` just for this CLI.
 ### Debian/Ubuntu packages
 
 ```bash
-sudo apt install ffmpeg xvfb libgl1-mesa-dri libglx-mesa0 libfuse2
+sudo apt install ffmpeg xvfb libgl1-mesa-dri libglx-mesa0 libopengl0 libfuse2
 ```
+
+`libopengl0` is the one people miss: without it the Slippi playback binary
+fails at startup with `libOpenGL.so.0: cannot open shared object file`.
 
 If the AppImage cannot mount on the server, extract it once and point
 `SLIPPI_PLAYBACK` at the extracted `AppRun`:

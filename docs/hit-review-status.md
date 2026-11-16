@@ -135,6 +135,12 @@ because the cursor only moves after delivery succeeds.
 - `scripts/sync-replays-clyde.sh` runs on the **local machine** from cron at
   :07 and :37 (it has to: that is where Dolphin writes replays) and mirrors
   `~/Slippi` to `clyde:~/Slippi` with `--ignore-existing`.
+- Clyde's first real render failed before the fix was installed: the Slippi
+  playback binary needs `libopengl0` (`libOpenGL.so.0`), which was missing
+  from the server. The failure path behaved as designed — the render failed,
+  0 clips were sent, and the cursor did not advance, so the same event retries
+  on the next run. Install `libopengl0` on the server before the hourly job
+  can produce clips.
 
 ## What is next
 
