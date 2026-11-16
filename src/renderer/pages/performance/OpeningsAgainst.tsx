@@ -7,11 +7,13 @@ import { Pill, PillRow } from "../../components/ui/Pill";
 import { useOpeningsAgainst } from "../../hooks/queries";
 import type { OpeningsAgainstFilters, OpeningsAgainstResult } from "../../../openingsAgainst";
 import { EVENT_SAMPLE_GUARDS, OPENING_SITUATION_ORDER } from "../../../characterEventProfile";
+import { OPENING_PERCENT_BANDS, type OpeningPercentBand } from "../../../openingPercentBands";
 import { pct, prettyLabel, ratio } from "../characters/shared";
 
 type OpeningBucket = OpeningsAgainstResult["buckets"][number];
 type OpeningExample = OpeningsAgainstResult["examples"][number];
-type ClusterSummary = Extract<OpeningsAgainstResult["clusters"], { status: "ok" }>["clusters"][number];
+type SequenceGroup = Extract<OpeningsAgainstResult["clusters"], { status: "ok" }>["groups"][number];
+type SequenceCluster = SequenceGroup["clusters"][number];
 
 const RECENCY_OPTIONS = [50, 100, 200, 500] as const;
 const SITUATION_RANK = new Map(OPENING_SITUATION_ORDER.map((key, index) => [key, index]));
@@ -27,6 +29,26 @@ function sortBuckets(buckets: OpeningBucket[], by: "count" | "kills"): OpeningBu
     if (b.kills !== a.kills) return b.kills - a.kills;
     return a.openerLabel.localeCompare(b.openerLabel);
   });
+}
+
+function PercentBandChart({ bands }: { bands: OpeningPercentBand[] }) {
+  return (
+    <div className="openings-bands">
+      {bands.map((band) => (
+        <div
+          key={band.key}
+          className="openings-band"
+          title={`${band.count} opening${band.count === 1 ? "" : "s"} · ${band.kills} kill${band.kills === 1 ? "" : "s"}`}
+        >
+          <span>{band.label}</span>
+          <span className="mono">
+            {band.count}
+            {band.kills > 0 ? ` · ${band.kills}K` : ""}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 interface SituationSection {
@@ -131,17 +153,7 @@ function BucketRow({
           <div className="openings-detail-grid">
             <div className="openings-detail-block">
               <span className="openings-detail-heading">Victim percent at the first hit</span>
-              <div className="openings-bands">
-                {bucket.splits.percentBands.map((band) => (
-                  <div key={band.key} className="openings-band">
-                    <span>{band.label}</span>
-                    <span className="mono">
-                      {band.count}
-                      {band.kills > 0 ? ` · ${band.kills}K` : ""}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <PercentBandChart bands={bucket.splits.percentBands} />
             </div>
             <div className="openings-detail-block">
               <span className="openings-detail-heading">Qualifiers</span>
@@ -190,46 +202,115 @@ function BucketRow({
   );
 }
 
-function ClusterCard({
+function SequenceClusterRow({
   cluster,
+  groupWithSequence,
+  dimmed,
+  expanded,
+  onToggle,
   onOpenExample,
 }: {
-  cluster: ClusterSummary;
+  cluster: SequenceCluster;
+  groupWithSequence: number;
+  dimmed: boolean;
+  expanded: boolean;
+  onToggle: () => void;
   onOpenExample: (example: OpeningExample) => void;
 }) {
+  const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
-    <div className="openings-cluster-card">
-      <div className="openings-cluster-head">
-        <div>
-          <span className="openings-cluster-label">{cluster.label}</span>
-          <span className="openings-cluster-dominant">
-            Mostly {prettyLabel(cluster.dominantSituation)} · {prettyLabel(cluster.dominantFamily)} ·{" "}
-            {prettyLabel(cluster.dominantOpenerLabel)}
+    <div className={`openings-bucket${dimmed ? " openings-bucket-dim" : ""}`}>
+      <button
+        type="button"
+        className="openings-bucket-row"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        title={
+          dimmed
+            ? `${cluster.label}: ${cluster.size} openings — collect more games before reading this as a habit`
+            : `${cluster.label}: ${cluster.size} of ${groupWithSequence} openings with a recorded move list`
+        }
+      >
+        <Chevron size={12} className="openings-bucket-chevron" aria-hidden="true" />
+        <span className="openings-bucket-label">
+          <span>{cluster.label}</span>
+          {cluster.kind === "tail" && <span className="openings-family-tag">{cluster.variants} seq</span>}
+          <span className={`openings-family-tag openings-family-${cluster.dominantFamily}`}>
+            {prettyLabel(cluster.dominantFamily)}
           </span>
+        </span>
+        <span className="openings-bar-track">
+          <span className="openings-bar-fill" style={{ width: `${Math.min(100, cluster.share * 100)}%` }} />
+        </span>
+        <span className="openings-bucket-share">
+          {pct(cluster.size, groupWithSequence)}{" "}
+          <span className="openings-ratio">{ratio(cluster.size, groupWithSequence)}</span>
+        </span>
+        <span
+          className="openings-bucket-kill"
+          title={`${cluster.kills} kill${cluster.kills === 1 ? "" : "s"} off this sequence`}
+        >
+          {pct(cluster.kills, cluster.size)}{" "}
+          <span className="openings-ratio">{ratio(cluster.kills, cluster.size)}</span>
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="openings-bucket-details">
+          <div className="openings-detail-grid">
+            <div className="openings-detail-block">
+              <span className="openings-detail-heading">Victim percent at the first hit</span>
+              <PercentBandChart bands={cluster.percentBands} />
+            </div>
+            <div className="openings-detail-block">
+              <span className="openings-detail-heading">Qualifiers</span>
+              <div className="openings-qualifiers">
+                <span>
+                  Victim percent <strong className="mono">{Math.round(cluster.percentMean)}% avg</strong>{" "}
+                  <span className="mono">
+                    ({Math.round(cluster.percentP25)}–{Math.round(cluster.percentP75)}% middle half,{" "}
+                    {Math.round(cluster.percentMedian)}% median)
+                  </span>
+                </span>
+                <span>
+                  Cornered <strong className="mono">{Math.round(cluster.corneredShare * 100)}%</strong>
+                </span>
+                <span>
+                  On platform <strong className="mono">{Math.round(cluster.onPlatformShare * 100)}%</strong>
+                </span>
+                <span>
+                  Avg damage <strong className="mono">{cluster.avgDamage.toFixed(1)}</strong>
+                </span>
+                <span>
+                  Avg hits <strong className="mono">{cluster.avgMoveCount.toFixed(1)}</strong>
+                </span>
+                <span>
+                  Games <strong className="mono">{cluster.distinctGames}</strong>
+                </span>
+                {cluster.kind === "tail" && (
+                  <span>
+                    Distinct sequences <strong className="mono">{cluster.variants}</strong>
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="openings-example-row">
+            <span className="openings-example-label">Examples</span>
+            {cluster.examples.length > 0 ? (
+              cluster.examples.map((example) => (
+                <ExampleChip
+                  key={`${example.gameId}-${example.startFrame}`}
+                  example={example}
+                  onOpen={() => onOpenExample(example)}
+                />
+              ))
+            ) : (
+              <span className="openings-example-empty">No navigable examples</span>
+            )}
+          </div>
         </div>
-        <span className="openings-cluster-size mono">
-          {cluster.size} · {Math.round(cluster.share * 100)}%
-        </span>
-      </div>
-      <div className="openings-cluster-meta">
-        <span>
-          Percent {cluster.percentMean}% avg · {cluster.percentMedian}% median
-        </span>
-        <span>Distance {cluster.distanceMean}</span>
-        <span>Cornered {Math.round(cluster.corneredShare * 100)}%</span>
-        <span>Kill rate {Math.round(cluster.killRate * 100)}%</span>
-        <span>Avg damage {cluster.avgDamage.toFixed(1)}</span>
-        <span>Games {cluster.distinctGames}</span>
-      </div>
-      <div className="openings-example-row">
-        {cluster.examples.map((example) => (
-          <ExampleChip
-            key={`${example.gameId}-${example.startFrame}`}
-            example={example}
-            onOpen={() => onOpenExample(example)}
-          />
-        ))}
-      </div>
+      )}
     </div>
   );
 }
@@ -239,6 +320,7 @@ export function OpeningsAgainst() {
   const [character, setCharacter] = useState("all");
   const [opponentCharacter, setOpponentCharacter] = useState("all");
   const [stage, setStage] = useState("all");
+  const [percentBand, setPercentBand] = useState("all");
   const [limit, setLimit] = useState<number>(200);
   const [sort, setSort] = useState<"count" | "kills">("count");
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -248,8 +330,9 @@ export function OpeningsAgainst() {
     if (character !== "all") filters.character = character;
     if (opponentCharacter !== "all") filters.opponentCharacter = opponentCharacter;
     if (stage !== "all") filters.stage = stage;
+    if (percentBand !== "all") filters.percentBand = percentBand;
     return filters;
-  }, [character, opponentCharacter, stage, limit]);
+  }, [character, opponentCharacter, stage, percentBand, limit]);
 
   const { data, isLoading, isError } = useOpeningsAgainst(queryFilters);
   const openExample = (example: OpeningExample) => {
@@ -322,6 +405,21 @@ export function OpeningsAgainst() {
             </select>
           </label>
           <label>
+            <span className="tweaks-label">Victim percent at the first hit</span>
+            <select
+              className="library-filter-input"
+              value={percentBand}
+              onChange={(event) => setPercentBand(event.target.value)}
+            >
+              <option value="all">All percents</option>
+              {OPENING_PERCENT_BANDS.map((band) => (
+                <option key={band.key} value={band.key}>
+                  {band.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             <span className="tweaks-label">Recency</span>
             <select
               className="library-filter-input"
@@ -363,6 +461,13 @@ export function OpeningsAgainst() {
                 Avg victim percent <strong className="mono">{data.baseline.avgPercent.toFixed(0)}%</strong>
               </span>
             </div>
+
+            {data.baseline.total > 0 && (
+              <div className="openings-global-bands">
+                <span className="openings-detail-heading">Victim percent at the first hit · all openings in scope</span>
+                <PercentBandChart bands={data.baseline.percentBands} />
+              </div>
+            )}
 
             {missingGames > 0 && (
               <div className="openings-coverage-warning" role="status">
@@ -425,33 +530,69 @@ export function OpeningsAgainst() {
 
                 <div className="openings-clusters">
                   <div className="openings-list-header">
-                    <span className="openings-list-title">Shape clusters</span>
+                    <span className="openings-list-title">Conversion sequences by opponent</span>
                     <span className="performance-data-note">Descriptive only · recomputed for this filter</span>
                   </div>
 
                   {data.clusters.status === "insufficient-sample" ? (
                     <div className="openings-clusters-note">
-                      {data.clusters.reason === "n-below-40"
-                        ? `Shape clusters need ${data.clusters.required} openings in this scope — ${data.clusters.n} so far.`
-                        : `No grouping reached the minimum cluster size of ${data.clusters.minClusterSize} openings at k 2–6.`}
+                      {data.clusters.reason === "n-below-25"
+                        ? `Conversion sequences need ${data.clusters.required} openings in this scope — ${data.clusters.n} so far.`
+                        : "No opening in this scope has a recorded conversion move list, so there are no conversion sequences to group."}
                     </div>
                   ) : (
                     <>
-                      {data.clusters.weakSeparation && (
-                        <div className="openings-clusters-note">
-                          These groups overlap (silhouette {data.clusters.silhouette.toFixed(2)}). Treat them as a rough
-                          map of where openings happen, not as separate habits.
+                      {data.clusters.groups.map((group) => (
+                        <div className="openings-situation-section" key={group.opponentCharacter}>
+                          <div className="openings-situation-header">
+                            <span className="openings-situation-name">vs {group.opponentCharacter}</span>
+                            <span className="mono">
+                              {group.n} openings · {group.withSequence} with move lists
+                            </span>
+                          </div>
+                          {group.lowSample && (
+                            <div className="openings-clusters-note">
+                              Only {group.n} openings against {group.opponentCharacter} in this scope. Sequences are
+                              descriptive — collect more games before reading them as habits.
+                            </div>
+                          )}
+                          {group.withoutSequence > 0 && (
+                            <div className="openings-clusters-note">
+                              {group.withoutSequence} of {group.n} openings have no recorded conversion move list and
+                              are excluded from these sequences.
+                            </div>
+                          )}
+                          {group.clusters.length === 0 ? (
+                            <div className="openings-clusters-note">
+                              No recorded conversion move lists for these openings.
+                            </div>
+                          ) : (
+                            group.clusters.map((cluster) => {
+                              const key = `${group.opponentCharacter}|${cluster.id}`;
+                              return (
+                                <SequenceClusterRow
+                                  key={key}
+                                  cluster={cluster}
+                                  groupWithSequence={group.withSequence}
+                                  dimmed={group.lowSample || cluster.size < EVENT_SAMPLE_GUARDS.openingsBucketMin}
+                                  expanded={expanded === key}
+                                  onToggle={() => setExpanded((current) => (current === key ? null : key))}
+                                  onOpenExample={openExample}
+                                />
+                              );
+                            })
+                          )}
                         </div>
-                      )}
-                      <div className="openings-cluster-grid">
-                        {data.clusters.clusters.map((cluster) => (
-                          <ClusterCard key={cluster.id} cluster={cluster} onOpenExample={openExample} />
-                        ))}
-                      </div>
+                      ))}
                       <p className="openings-clusters-caption">
-                        Clusters use pre-hit percent, relative position, distance, stage position, and platform only.
-                        Situation and move labels are assigned after clustering. Cluster ids are not saved and are not
-                        used as filters.
+                        Each sequence lists the opponent's damaging moves in the full conversion, in the order the
+                        replay recorded them and with repeats preserved. A conversion can continue through resets and
+                        tech chases, so this is not a verified true combo. Sequences seen at least{" "}
+                        {EVENT_SAMPLE_GUARDS.openingsBucketMin} times stand alone; rarer continuations are grouped under
+                        their first move ("side b · …"), with the number of distinct sequences shown. Percent
+                        distributions use the victim's percent on the frame before the first hit; the bands are
+                        descriptive, not thresholds where a conversion becomes a true combo. Labels describe observed
+                        moves, not named techniques. Cluster ids are not saved and are not used as filters.
                       </p>
                     </>
                   )}

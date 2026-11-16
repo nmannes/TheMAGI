@@ -52,15 +52,15 @@ shows only the opening hit; the caption reports the resulting stock.
 ## Clipped openings from the ledger
 
 `npm run openings` can render the same "opening hit taken" clip for a rule
-bucket or shape cluster from the SQLite opening ledger. This path needs the
-desktop database (imported or backfilled games), unlike the chronological scan
-above:
+bucket or conversion-sequence cluster from the SQLite opening ledger. This path
+needs the desktop database (imported or backfilled games), unlike the
+chronological scan above:
 
 ```bash
 # Most frequent rule bucket, newest example
 npm run openings -- --send
 
-# A specific rule bucket (1-based, as printed) or shape cluster
+# A specific rule bucket (1-based, as printed) or conversion-sequence cluster
 npm run openings -- --send --bucket 1
 npm run openings -- --send --cluster 2
 
@@ -70,8 +70,8 @@ npm run openings -- --render --bucket 2 --clips 3 --out ~/clips
 
 Clips use 5 seconds of lead-in and 2 seconds after the opening event frame,
 the same bounds as the chronological opening-hit event. The caption names the
-measured bucket/cluster, its sample size, the pre-hit percent, and the full
-conversion's damage and stock outcome. `--send` reads `TELEGRAM_BOT_TOKEN` and
+measured rule bucket or conversion sequence, its sample size, the pre-hit percent,
+and the full conversion's damage and stock outcome. `--send` reads `TELEGRAM_BOT_TOKEN` and
 `TELEGRAM_CHAT_ID` from the environment; the daily wrapper loads `key.env` for
 you, or export them in the shell first.
 
@@ -127,6 +127,7 @@ export SLIPPI_PLAYBACK="$PWD/squashfs-root/AppRun"
    Telegram only returns updates from roughly the last 24 hours, and only after
    someone has messaged the bot. If the list is empty, send the bot a message and
    run the command again.
+
 4. Put the token and chat id in `key.env` at the repo root (it is gitignored):
 
    ```bash
@@ -148,24 +149,24 @@ npx tsx src/hit-review-cli.ts \
 
 Put these in `key.env` (loaded by the daily script) or the service environment:
 
-| Variable | Purpose |
-| --- | --- |
-| `MAGI_TARGET` | Player tag or connect code, e.g. `POOK#392`. Also accepts `CLIPPI_TARGET`. |
-| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather. |
-| `TELEGRAM_CHAT_ID` | Numeric chat id, group id, or `@channelusername`. |
-| `SLIPPI_PLAYBACK` | Path to the Slippi Playback AppImage or extracted `AppRun`. |
-| `MELEE_ISO` | Path to the Melee ISO. |
-| `REPLAY_DIR` | Replay folder to scan. Default `~/Slippi`. |
-| `HIT_REVIEW_LIMIT` | Clips per run. Default `2`. |
-| `HIT_REVIEW_CURSOR` | Local chronological cursor and parsed-event cache. Default `<repo>/data/hit-review-cursor.json`. |
-| `HIT_REVIEW_RESOLUTION` | `480p`, `720p`, `1080p`, `1440p`, `2160p`, or a raw EFBScale. Default `720p`. |
-| `HIT_REVIEW_MAX_OUT_SIZE` | Output cap. Default `1GB`; `0` disables pruning. |
-| `HIT_REVIEW_OUT` | Output directory. Default `~/.magi-melee/hit-review`. |
-| `HIT_REVIEW_TELEGRAM` | `0` renders without contacting Telegram. |
-| `HIT_REVIEW_DRY_RUN` | `1` prints planned clips without rendering or sending. |
-| `HIT_REVIEW_PATH` | Extra PATH entries for cron, e.g. an nvm Node bin directory. |
-| `HIT_REVIEW_KEY_ENV` | Path to the environment file. Default `<repo>/key.env`. |
-| `NPX_BIN` | Explicit `npx` path. |
+| Variable                  | Purpose                                                                                          |
+| ------------------------- | ------------------------------------------------------------------------------------------------ |
+| `MAGI_TARGET`             | Player tag or connect code, e.g. `POOK#392`. Also accepts `CLIPPI_TARGET`.                       |
+| `TELEGRAM_BOT_TOKEN`      | Bot token from @BotFather.                                                                       |
+| `TELEGRAM_CHAT_ID`        | Numeric chat id, group id, or `@channelusername`.                                                |
+| `SLIPPI_PLAYBACK`         | Path to the Slippi Playback AppImage or extracted `AppRun`.                                      |
+| `MELEE_ISO`               | Path to the Melee ISO.                                                                           |
+| `REPLAY_DIR`              | Replay folder to scan. Default `~/Slippi`.                                                       |
+| `HIT_REVIEW_LIMIT`        | Clips per run. Default `2`.                                                                      |
+| `HIT_REVIEW_CURSOR`       | Local chronological cursor and parsed-event cache. Default `<repo>/data/hit-review-cursor.json`. |
+| `HIT_REVIEW_RESOLUTION`   | `480p`, `720p`, `1080p`, `1440p`, `2160p`, or a raw EFBScale. Default `720p`.                    |
+| `HIT_REVIEW_MAX_OUT_SIZE` | Output cap. Default `1GB`; `0` disables pruning.                                                 |
+| `HIT_REVIEW_OUT`          | Output directory. Default `~/.magi-melee/hit-review`.                                            |
+| `HIT_REVIEW_TELEGRAM`     | `0` renders without contacting Telegram.                                                         |
+| `HIT_REVIEW_DRY_RUN`      | `1` prints planned clips without rendering or sending.                                           |
+| `HIT_REVIEW_PATH`         | Extra PATH entries for cron, e.g. an nvm Node bin directory.                                     |
+| `HIT_REVIEW_KEY_ENV`      | Path to the environment file. Default `<repo>/key.env`.                                          |
+| `NPX_BIN`                 | Explicit `npx` path.                                                                             |
 
 `MAGI_TARGET` falls back to the connect code or player tag in
 `~/.magi-melee/config.json`. On a server that has never run the app, set

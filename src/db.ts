@@ -14,7 +14,9 @@ import {
   aggregateOpeningBuckets,
   clusterOpenings,
   openingExample,
+  openingPercentBand,
   summarizeOpenings,
+  OPENING_PERCENT_BANDS,
 } from "./pipeline/openingClusters.js";
 import {
   OPENINGS_AGAINST_DEFAULT_LIMIT,
@@ -3847,14 +3849,57 @@ function toOpeningEvent(row: OpeningEventDbRow, stageId: number | null): Opening
   return event;
 }
 
+interface ConversionMoveDbRow {
+  gameId: number;
+  startFrame: number;
+  endFrame: number | null;
+  moveCount: number;
+  openerMoveId: number | null;
+  movesJson: string;
+}
+
+/**
+ * Identity of the conversion an opening row describes, used to join the
+ * stored conversion move list. start/end frame, move count and opener move id
+ * all come from the same detector pass, so a match is the same conversion.
+ */
+function conversionMoveKey(row: {
+  gameId: number;
+  startFrame: number;
+  endFrame: number | null;
+  moveCount: number;
+  openerMoveId: number | null;
+}): string {
+  return `${row.gameId}:${row.startFrame}:${row.endFrame ?? "x"}:${row.moveCount}:${row.openerMoveId ?? "x"}`;
+}
+
+/** Parse conversions.moves_json into ordered move ids; null when unusable. */
+function parseConversionMoveIds(json: string): number[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  const ids: number[] = [];
+  for (const move of parsed) {
+    if (move != null && typeof move === "object" && typeof (move as { moveId?: unknown }).moveId === "number") {
+      ids.push((move as { moveId: number }).moveId);
+    }
+  }
+  return ids.length > 0 ? ids : null;
+}
+
 /**
  * The openings the target player keeps getting hit by: first hits in neutral
  * of opponent conversions where the player is the victim. Scoped by games
  * (character/opponent/stage/opponent key) and by recency (limit = most recent
  * scoped games, default 200, max 1000). Only games parsed by the current
  * detector version contribute rows — the coverage block lets the UI warn when
- * older games need a backfill. Rule buckets and shape clusters are computed
- * from the same raw row set, loaded once.
+ * older games need a backfill. Rule buckets and conversion-sequence clusters are
+ * computed from the same raw row set, loaded once; sequences come from the
+ * matching `conversions.moves_json` rows.
  */
 export function getOpeningsAgainst(filters: OpeningsAgainstFilters = {}): OpeningsAgainstResult {
   const db = getDb();
@@ -3862,6 +3907,12 @@ export function getOpeningsAgainst(filters: OpeningsAgainstFilters = {}): Openin
     Math.max(Math.floor(filters.limit ?? OPENINGS_AGAINST_DEFAULT_LIMIT), 1),
     OPENINGS_AGAINST_MAX_LIMIT,
   );
+  const percentBand = filters.percentBand ? openingPercentBand(filters.percentBand) : undefined;
+  if (filters.percentBand && !percentBand) {
+    throw new Error(
+      `Unknown opening percent band "${filters.percentBand}". Use one of: ${OPENING_PERCENT_BANDS.map((b) => b.key).join(", ")}.`,
+    );
+  }
 
   const conditions: string[] = [];
   const params: Record<string, unknown> = { v: FRAME_EVENTS_VERSION, limit };
@@ -3885,17 +3936,20 @@ export function getOpeningsAgainst(filters: OpeningsAgainstFilters = {}): Openin
 
   const scopeRows = db
     .prepare(
-      `SELECT g.id as id, g.stage as stage, COALESCE(g.events_version, 1) >= @v as current
+      `SELECT g.id as id, g.stage as stage, g.opponent_character as opponentCharacter,
+              COALESCE(g.events_version, 1) >= @v as current
        FROM games g
        ${where}
        ORDER BY COALESCE(g.played_at, '') DESC, g.id DESC
        LIMIT @limit`,
     )
-    .all(params) as { id: number; stage: string; current: number }[];
+    .all(params) as { id: number; stage: string; opponentCharacter: string; current: number }[];
 
   const currentRows = scopeRows.filter((row) => row.current);
   const stageById = new Map(scopeRows.map((row) => [row.id, row.stage]));
+  const opponentById = new Map(scopeRows.map((row) => [row.id, row.opponentCharacter]));
   let rows: OpeningEventDbRow[] = [];
+  let moveIdsByConversion = new Map<string, number[]>();
   if (currentRows.length > 0) {
     const placeholders = currentRows.map(() => "?").join(", ");
     rows = db
@@ -3918,9 +3972,44 @@ export function getOpeningsAgainst(filters: OpeningsAgainstFilters = {}): Openin
          ORDER BY oe.game_id, oe.start_frame, oe.id`,
       )
       .all(...currentRows.map((row) => row.id)) as OpeningEventDbRow[];
+
+    // The opponent's full conversion move list backs the conversion-sequence
+    // clusters. It is stored once in conversions.moves_json and matched to
+    // the opening by the same conversion identity (game, start/end frame,
+    // move count, first move id), never re-derived from the opening row.
+    const moveRows = db
+      .prepare(
+        `SELECT game_id as gameId, start_frame as startFrame, end_frame as endFrame,
+                move_count as moveCount, opener_move_id as openerMoveId, moves_json as movesJson
+         FROM conversions
+         WHERE attacker_is_player = 0
+           AND game_id IN (${placeholders})`,
+      )
+      .all(...currentRows.map((row) => row.id)) as ConversionMoveDbRow[];
+
+    moveIdsByConversion = new Map<string, number[]>();
+    for (const moveRow of moveRows) {
+      const moveIds = parseConversionMoveIds(moveRow.movesJson);
+      if (!moveIds) continue;
+      if (moveRow.openerMoveId != null && moveIds[0] !== moveRow.openerMoveId) continue;
+      moveIdsByConversion.set(conversionMoveKey(moveRow), moveIds);
+    }
   }
 
-  const events = rows.map((row) => toOpeningEvent(row, stageIdFromName(stageById.get(row.gameId) ?? "") ?? null));
+  if (percentBand) {
+    rows = rows.filter(
+      (row) => row.victimPercent >= percentBand.min && (percentBand.max == null || row.victimPercent < percentBand.max),
+    );
+  }
+
+  const events = rows.map((row) => {
+    const event = toOpeningEvent(row, stageIdFromName(stageById.get(row.gameId) ?? "") ?? null);
+    const opponentCharacter = opponentById.get(row.gameId);
+    if (opponentCharacter) event.opponentCharacter = opponentCharacter;
+    const moveIds = moveIdsByConversion.get(conversionMoveKey(row));
+    if (moveIds) event.moveIds = moveIds;
+    return event;
+  });
   const gamesWithOpenings = new Set(events.map((event) => event.gameId)).size;
 
   const examples = [...events]
@@ -3943,7 +4032,7 @@ export function getOpeningsAgainst(filters: OpeningsAgainstFilters = {}): Openin
     },
     baseline: summarizeOpenings(events),
     buckets: aggregateOpeningBuckets(events),
-    clusters: clusterOpenings(events, filters.clusterK != null ? { k: filters.clusterK } : {}),
+    clusters: clusterOpenings(events),
     examples,
     options: {
       characters: distinctValues("player_character"),

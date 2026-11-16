@@ -3,6 +3,7 @@ import type { OpeningEvent } from "../src/pipeline/frameEvents";
 import {
   aggregateOpeningBuckets,
   clusterOpenings,
+  openingSequenceLabels,
   sortOpeningBuckets,
   summarizeOpenings,
 } from "../src/pipeline/openingClusters";
@@ -223,169 +224,228 @@ describe("openingClusters: rule buckets", () => {
   });
 });
 
-function clusterFixture(): OpeningEvent[] {
-  const events: OpeningEvent[] = [];
-  for (let i = 0; i < 30; i++) {
-    events.push(
-      opening({
-        id: i + 1,
-        gameId: Math.floor(i / 5) + 1,
-        startFrame: 100 + i,
-        stageId: 32,
-        situation: "commitment",
-        openerFamily: "grounded",
-        openerLabel: "dash attack",
-        victimPercent: 20 + (i % 5),
-        relativeX: -5 + (i % 3),
-        relativeY: 0,
-        distance: 20 + (i % 3),
-        victimX: -50 + (i % 3),
-        victimY: 0,
-        onPlatform: false,
-        damage: 8,
-        moveCount: 1,
-        didKill: i % 10 === 0,
-      }),
-    );
-  }
-  for (let i = 0; i < 30; i++) {
-    events.push(
-      opening({
-        id: 31 + i,
-        gameId: Math.floor(i / 5) + 7,
-        startFrame: 300 + i,
-        stageId: 32,
-        situation: "shield",
-        openerFamily: "grab",
-        openerLabel: "grab (bthrow)",
-        grab: true,
-        openerMoveId: 54,
-        victimPercent: 100 + (i % 5),
-        relativeX: 30 + (i % 3),
-        relativeY: 10,
-        distance: 70 + (i % 3),
-        victimX: 60 + (i % 3),
-        victimY: 0,
-        onPlatform: false,
-        damage: 12,
-        moveCount: 2,
-        didKill: i % 15 === 0,
-      }),
-    );
-  }
-  return events;
+const MOVE_LABEL: Record<number, string> = {
+  1: "misc",
+  6: "dash attack",
+  13: "nair",
+  14: "fair",
+  15: "bair",
+  16: "uair",
+  17: "dair",
+  18: "neutral b",
+  19: "side b",
+  54: "bthrow",
+};
+
+/** Opening with an explicit opponent conversion move list. */
+function sequenceEvent(options: {
+  id: number;
+  opponentCharacter?: string;
+  moves: number[];
+  openerLabel?: string;
+  grab?: boolean;
+  openerFamily?: OpeningEvent["openerFamily"];
+  startFrame?: number;
+  gameId?: number;
+  didKill?: boolean;
+  damage?: number;
+  cornered?: boolean;
+  onPlatform?: boolean;
+  victimPercent?: number;
+}): OpeningEvent {
+  const firstMoveId = options.moves[0]!;
+  return opening({
+    id: options.id,
+    gameId: options.gameId ?? Math.floor((options.id - 1) / 5) + 1,
+    startFrame: options.startFrame ?? 100 + options.id,
+    opponentCharacter: options.opponentCharacter ?? "Falco",
+    openerMoveId: firstMoveId,
+    openerLabel: options.openerLabel ?? MOVE_LABEL[firstMoveId] ?? `move #${firstMoveId}`,
+    openerFamily: options.openerFamily ?? "aerial",
+    grab: options.grab ?? false,
+    moveIds: options.moves,
+    moveCount: options.moves.length,
+    damage: options.damage ?? 10,
+    didKill: options.didKill ?? false,
+    cornered: options.cornered ?? false,
+    onPlatform: options.onPlatform ?? false,
+    victimPercent: options.victimPercent ?? 40,
+  });
 }
 
 function reverse<T>(items: T[]): T[] {
   return [...items].reverse();
 }
 
-describe("openingClusters: statistical clusters", () => {
-  it("returns an explicit insufficient-sample result below 40 openings", () => {
-    const result = clusterOpenings(clusterFixture().slice(0, 39));
-    expect(result).toEqual({
-      status: "insufficient-sample",
-      reason: "n-below-40",
-      n: 39,
-      required: 40,
-      minClusterSize: 8,
-    });
-  });
+function sequenceFixture(): OpeningEvent[] {
+  const events: OpeningEvent[] = [];
+  let id = 1;
+  // Falco exact sequences at and above the 8-opening exact minimum.
+  for (let i = 0; i < 10; i++) events.push(sequenceEvent({ id: id++, moves: [14, 14, 13] }));
+  for (let i = 0; i < 10; i++) events.push(sequenceEvent({ id: id++, moves: [17, 17] }));
+  for (let i = 0; i < 8; i++) events.push(sequenceEvent({ id: id++, moves: [18], openerFamily: "special" }));
+  // Falco tail: two rare side-b continuations (5 each, below the minimum).
+  for (let i = 0; i < 5; i++) events.push(sequenceEvent({ id: id++, moves: [19, 13], openerFamily: "special" }));
+  for (let i = 0; i < 5; i++) events.push(sequenceEvent({ id: id++, moves: [19, 14], openerFamily: "special" }));
+  // Marth: the same fair-fair-nair label, in its own opponent group.
+  for (let i = 0; i < 9; i++) events.push(sequenceEvent({ id: id++, opponentCharacter: "Marth", moves: [14, 14, 13] }));
+  for (let i = 0; i < 3; i++) events.push(sequenceEvent({ id: id++, opponentCharacter: "Marth", moves: [17, 13] }));
+  return events;
+}
 
-  it("clusters a separated set with valid sizes and descriptive labels", () => {
-    const events = clusterFixture();
-    const result = clusterOpenings(events);
+describe("openingClusters: conversion sequences by opponent", () => {
+  it("groups exact sequences by opponent, preserving order, repeats and labels", () => {
+    const result = clusterOpenings(sequenceFixture());
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
 
-    expect(result.n).toBe(60);
-    expect(result.k).toBeGreaterThanOrEqual(2);
-    expect(result.k).toBeLessThanOrEqual(6);
-    expect(result.minClusterSize).toBe(8);
-    expect(result.clusters.reduce((sum, c) => sum + c.size, 0)).toBe(60);
-    expect(result.clusters.map((c) => c.id)).toEqual(result.clusters.map((_, i) => i + 1));
-    for (const cluster of result.clusters) {
-      expect(cluster.size).toBeGreaterThanOrEqual(result.minClusterSize);
-      expect(cluster.share).toBeGreaterThan(0);
-      expect(cluster.examples.length).toBeGreaterThan(0);
-      expect(cluster.label).toMatch(/^(close|mid|far) range · /);
-      expect(cluster.label).not.toMatch(/ken|combo|wavedash|tech chase|grab|dash attack/i);
-    }
-    expect(result.weakSeparation).toBe(result.silhouette < 0.2);
+    expect(result.groups.map((group) => group.opponentCharacter)).toEqual(["Falco", "Marth"]);
 
-    const dash = result.clusters.find((c) => c.dominantOpenerLabel === "dash attack")!;
-    expect(dash.dominantSituation).toBe("commitment");
-    expect(dash.dominantFamily).toBe("grounded");
-    const grab = result.clusters.find((c) => c.dominantOpenerLabel === "grab (bthrow)")!;
-    expect(grab.dominantSituation).toBe("shield");
-    expect(grab.dominantFamily).toBe("grab");
+    const falco = result.groups[0]!;
+    expect(falco.n).toBe(38);
+    expect(falco.withSequence).toBe(38);
+    expect(falco.withoutSequence).toBe(0);
+    expect(falco.lowSample).toBe(false);
+    expect(falco.clusters.reduce((sum, cluster) => sum + cluster.size, 0)).toBe(38);
+
+    const fairFairNair = falco.clusters.find((cluster) => cluster.label === "fair · fair · nair")!;
+    expect(fairFairNair.kind).toBe("exact");
+    expect(fairFairNair.sequence).toEqual(["fair", "fair", "nair"]);
+    expect(fairFairNair.size).toBe(10);
+    expect(fairFairNair.variants).toBe(1);
+
+    expect(falco.clusters.find((cluster) => cluster.label === "dair · dair")!.size).toBe(10);
+    // Exactly at the exact-sequence minimum.
+    expect(falco.clusters.find((cluster) => cluster.label === "neutral b")!.size).toBe(8);
+
+    const tail = falco.clusters.find((cluster) => cluster.kind === "tail")!;
+    expect(tail.label).toBe("side b · …");
+    expect(tail.sequence).toEqual(["side b"]);
+    expect(tail.size).toBe(10);
+    expect(tail.variants).toBe(2);
+
+    // The same sequence label in another opponent group stays separate.
+    const marth = result.groups[1]!;
+    expect(marth.lowSample).toBe(true);
+    expect(marth.clusters.find((cluster) => cluster.label === "fair · fair · nair")!.size).toBe(9);
+
+    // Display ids are unique across groups (used by --cluster).
+    const ids = result.groups.flatMap((group) => group.clusters.map((cluster) => cluster.id));
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(ids.map((_, index) => index + 1));
   });
 
-  it("is deterministic under input shuffling and repeated calls", () => {
-    const events = clusterFixture();
-    const first = clusterOpenings(events);
-    const second = clusterOpenings(events);
-    const shuffled = clusterOpenings(reverse(events));
-    expect(second).toEqual(first);
-    expect(shuffled).toEqual(first);
-  });
-
-  it("honors a forced k within 2-6 and rejects an out-of-range k", () => {
-    const result = clusterOpenings(clusterFixture(), { k: 3 });
-    expect(result.status).toBe("ok");
-    if (result.status === "ok") expect(result.k).toBe(3);
-
-    const invalid = clusterOpenings(clusterFixture(), { k: 1 });
-    expect(invalid.status).toBe("insufficient-sample");
-    if (invalid.status === "insufficient-sample") expect(invalid.reason).toBe("no-valid-k");
-  });
-
-  it("returns no-valid-k when every candidate partitions a point below the minimum size", () => {
-    const identical = Array.from({ length: 40 }, (_, i) =>
-      opening({ id: i + 1, gameId: 1, startFrame: 100 + i, stageId: 32 }),
-    );
-    const result = clusterOpenings(identical);
-    expect(result.status).toBe("insufficient-sample");
-    if (result.status === "insufficient-sample") {
-      expect(result.reason).toBe("no-valid-k");
-      expect(result.minClusterSize).toBe(8);
-    }
-  });
-
-  it("enforces the minimum cluster size against a single outlier", () => {
-    const withOutlier = [
-      ...Array.from({ length: 44 }, (_, i) =>
-        opening({
+  it("keeps the opening ledger's grab/projectile notation as the first element", () => {
+    const events = [
+      ...Array.from({ length: 8 }, (_, i) =>
+        sequenceEvent({
           id: i + 1,
-          gameId: 1,
-          startFrame: 100 + i,
-          stageId: 32,
-          victimPercent: 40 + (i % 3),
-          relativeX: 10,
-          distance: 20,
-          victimX: 0,
+          moves: [54, 14, 14],
+          grab: true,
+          openerLabel: "grab (bthrow)",
+          openerFamily: "grab",
         }),
       ),
-      opening({
-        id: 45,
-        gameId: 1,
-        startFrame: 300,
-        stageId: 32,
-        victimPercent: 140,
-        relativeX: -120,
-        relativeY: 80,
-        distance: 220,
-        victimX: -80,
-      }),
+      ...Array.from({ length: 8 }, (_, i) =>
+        sequenceEvent({ id: 100 + i, moves: [1, 13], openerLabel: "projectile", openerFamily: "projectile" }),
+      ),
+      ...Array.from({ length: 9 }, (_, i) => sequenceEvent({ id: 200 + i, moves: [13, 13] })),
     ];
-    expect(withOutlier).toHaveLength(45);
-    // minClusterSize = max(8, ceil(0.05 * 45)) = 8, so the isolated outlier
-    // can never form a legal cluster and no k is accepted.
-    const result = clusterOpenings(withOutlier);
-    expect(result.status).toBe("insufficient-sample");
-    if (result.status === "insufficient-sample") {
-      expect(result.reason).toBe("no-valid-k");
-      expect(result.minClusterSize).toBe(8);
-    }
+    const result = clusterOpenings(events);
+    if (result.status !== "ok") throw new Error("expected clusters");
+    const labels = result.groups[0]!.clusters.map((cluster) => cluster.label);
+    expect(labels).toContain("grab (bthrow) · fair · fair");
+    expect(labels).toContain("projectile · nair");
+  });
+
+  it("labels unmapped move ids with their id instead of guessing a technique", () => {
+    const events = [
+      ...Array.from({ length: 10 }, (_, i) => sequenceEvent({ id: i + 1, moves: [59, 16], openerFamily: "special" })),
+      ...Array.from({ length: 15 }, (_, i) => sequenceEvent({ id: 100 + i, moves: [13] })),
+    ];
+    const result = clusterOpenings(events);
+    if (result.status !== "ok") throw new Error("expected clusters");
+    expect(result.groups[0]!.clusters.some((cluster) => cluster.label === "move #59 · uair")).toBe(true);
+  });
+
+  it("reports openings without a recorded move list instead of inventing a sequence", () => {
+    const noSequence = Array.from({ length: 30 }, (_, i) =>
+      opening({ id: i + 1, gameId: 1, startFrame: 100 + i, opponentCharacter: "Falco" }),
+    );
+    const empty = clusterOpenings(noSequence);
+    expect(empty.status).toBe("insufficient-sample");
+    if (empty.status === "insufficient-sample") expect(empty.reason).toBe("no-sequences");
+
+    const partial = [
+      ...Array.from({ length: 20 }, (_, i) => sequenceEvent({ id: i + 1, moves: [13] })),
+      ...Array.from({ length: 10 }, (_, i) =>
+        opening({ id: 100 + i, gameId: 1, startFrame: 200 + i, opponentCharacter: "Falco" }),
+      ),
+    ];
+    const result = clusterOpenings(partial);
+    if (result.status !== "ok") throw new Error("expected clusters");
+    expect(result.groups[0]!.withoutSequence).toBe(10);
+    expect(result.groups[0]!.withSequence).toBe(20);
+    expect(result.groups[0]!.clusters.reduce((sum, cluster) => sum + cluster.size, 0)).toBe(20);
+  });
+
+  it("reports the pre-hit percent distribution and quartiles for each sequence", () => {
+    const percents = [0, 10, 20, 29, 30, 40, 50, 59, 60, 70, 80, 89, 90, 100, 110, 119, 120, 130, 150, 200];
+    const events = [
+      ...percents.map((victimPercent, i) =>
+        sequenceEvent({
+          id: i + 1,
+          moves: [14, 14, 13],
+          victimPercent,
+          didKill: victimPercent >= 150 || (victimPercent >= 90 && victimPercent < 120),
+        }),
+      ),
+      ...Array.from({ length: 10 }, (_, i) => sequenceEvent({ id: 100 + i, moves: [13] })),
+    ];
+    const result = clusterOpenings(events);
+    if (result.status !== "ok") throw new Error("expected clusters");
+    const cluster = result.groups[0]!.clusters.find((candidate) => candidate.label === "fair · fair · nair")!;
+    expect(cluster.size).toBe(20);
+    // Half-open bands: 29 stays in 0–30, 30 starts 30–60, 120 starts 120%+.
+    expect(cluster.percentBands.map((band) => [band.label, band.count])).toEqual([
+      ["0–30%", 4],
+      ["30–60%", 4],
+      ["60–90%", 4],
+      ["90–120%", 4],
+      ["120%+", 4],
+    ]);
+    expect(cluster.percentBands.map((band) => band.kills)).toEqual([0, 0, 0, 4, 2]);
+    expect(cluster.percentBands.map((band) => band.killRate)).toEqual([0, 0, 0, 1, 0.5]);
+    expect(cluster.percentP25).toBe(37.5);
+    expect(cluster.percentMedian).toBe(75);
+    expect(cluster.percentP75).toBe(112.25);
+  });
+
+  it("returns an explicit insufficient-sample result below 25 openings", () => {
+    const result = clusterOpenings(sequenceFixture().slice(0, 24));
+    expect(result).toEqual({ status: "insufficient-sample", reason: "n-below-25", n: 24, required: 25 });
+  });
+
+  it("is deterministic under input shuffling", () => {
+    const events = sequenceFixture();
+    expect(clusterOpenings(reverse(events))).toEqual(clusterOpenings(events));
+  });
+});
+
+describe("openingSequenceLabels", () => {
+  it("returns null without a move list and maps ids in order", () => {
+    expect(openingSequenceLabels(opening())).toBeNull();
+    expect(openingSequenceLabels(opening({ moveIds: [14, 14, 13] }))).toEqual(["fair", "fair", "nair"]);
+    expect(openingSequenceLabels(opening({ moveIds: [59], openerFamily: "special" }))).toEqual(["move #59"]);
+  });
+
+  it("uses the opening label for grab and projectile first hits only", () => {
+    expect(openingSequenceLabels(opening({ moveIds: [54, 14], grab: true, openerLabel: "grab (bthrow)" }))).toEqual([
+      "grab (bthrow)",
+      "fair",
+    ]);
+    expect(
+      openingSequenceLabels(opening({ moveIds: [1, 13], openerFamily: "projectile", openerLabel: "projectile" })),
+    ).toEqual(["projectile", "nair"]);
   });
 });

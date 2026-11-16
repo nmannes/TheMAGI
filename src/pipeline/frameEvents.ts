@@ -327,6 +327,15 @@ export interface OpeningEvent {
   gameId?: number;
   /** Stages the event's game was played on; set by the DB query for clustering. */
   stageId?: number;
+  /** Opponent character for the event's game; set by the DB query for sequence grouping. */
+  opponentCharacter?: string;
+  /**
+   * Ordered move ids of the full conversion this opening started, first hit
+   * included. Set in-memory by extractOpeningEvents and reconstructed from
+   * conversions.moves_json by the DB read; absent when the move list is
+   * unavailable. This is the conversion sequence's raw evidence, never inferred.
+   */
+  moveIds?: number[];
   victimSlot: PlayerSlot;
   attackerSlot: PlayerSlot;
   startFrame: number;

@@ -70,7 +70,7 @@ import {
 } from "../src/db";
 import { persistFrameEvents } from "../src/importer";
 import { FRAME_EVENTS_VERSION } from "../src/pipeline/frameEvents";
-import type { GameFrameEvents, OpeningEvent } from "../src/pipeline/frameEvents";
+import type { ConversionRecord, GameFrameEvents, OpeningEvent } from "../src/pipeline/frameEvents";
 
 afterAll(() => {
   closeDb();
@@ -147,9 +147,9 @@ function opening(overrides: Partial<OpeningEvent> = {}): OpeningEvent {
   };
 }
 
-function events(openings: OpeningEvent[]): GameFrameEvents {
+function events(openings: OpeningEvent[], conversions: ConversionRecord[] = []): GameFrameEvents {
   return {
-    conversions: [],
+    conversions,
     stocks: [],
     habits: [],
     throwDI: [],
@@ -162,8 +162,13 @@ function events(openings: OpeningEvent[]): GameFrameEvents {
   };
 }
 
-function persist(gameId: number, openings: OpeningEvent[], playerIdx: 0 | 1 = 0): void {
-  persistFrameEvents(gameId, events(openings), playerIdx);
+function persist(
+  gameId: number,
+  openings: OpeningEvent[],
+  playerIdx: 0 | 1 = 0,
+  conversions: ConversionRecord[] = [],
+): void {
+  persistFrameEvents(gameId, events(openings, conversions), playerIdx);
 }
 
 /** getPatternData scopes to games that have at least one stock_deaths row. */
@@ -251,6 +256,42 @@ describe("getOpeningsAgainst", () => {
     expect(getOpeningsAgainst({ character: "Peach" }).clusters.status).toBe("insufficient-sample");
   });
 
+  it("filters openings to one pre-hit percent band with half-open boundaries", () => {
+    const gameId = seedGame();
+    persist(gameId, [
+      opening({ startFrame: 100, openerLabel: "zero", victimPercent: 0 }),
+      opening({ startFrame: 110, openerLabel: "below-30", victimPercent: 29 }),
+      opening({ startFrame: 120, openerLabel: "at-30", victimPercent: 30 }),
+      opening({ startFrame: 130, openerLabel: "below-60", victimPercent: 59 }),
+      opening({ startFrame: 140, openerLabel: "at-60", victimPercent: 60 }),
+      opening({ startFrame: 150, openerLabel: "at-119", victimPercent: 119 }),
+      opening({ startFrame: 160, openerLabel: "at-120", victimPercent: 120 }),
+    ]);
+
+    const low = getOpeningsAgainst({ percentBand: "0-30" });
+    expect(low.baseline.total).toBe(2);
+    expect(low.buckets.map((bucket) => bucket.openerLabel).sort()).toEqual(["below-30", "zero"]);
+    // The whole result (baseline, buckets, splits) is scoped to the filtered rows.
+    expect(low.baseline.percentBands.map((band) => band.count)).toEqual([2, 0, 0, 0, 0]);
+
+    // Both the key and the display label are accepted; 30 is inside [30, 60).
+    const mid = getOpeningsAgainst({ percentBand: "30–60%" });
+    expect(mid.baseline.total).toBe(2);
+    expect(mid.buckets.map((bucket) => bucket.openerLabel).sort()).toEqual(["at-30", "below-60"]);
+
+    const high = getOpeningsAgainst({ percentBand: "120+" });
+    expect(high.baseline.total).toBe(1);
+    expect(high.buckets[0]!.openerLabel).toBe("at-120");
+    expect(high.buckets[0]!.splits.percentBands.map((band) => band.count)).toEqual([0, 0, 0, 0, 1]);
+  });
+
+  it("NEGATIVE: rejects an unknown percent band instead of silently returning everything", () => {
+    seedGame();
+    expect(() => getOpeningsAgainst({ percentBand: "200+" })).toThrow(
+      /Unknown opening percent band "200\+".*0-30, 30-60, 60-90, 90-120, 120\+/,
+    );
+  });
+
   it("reports coverage and excludes games parsed by an older detector", () => {
     const currentA = seedGame();
     persist(currentA, [opening({ openerLabel: "current-a" })]);
@@ -325,7 +366,7 @@ describe("getOpeningsAgainst", () => {
     expect(result.options.stages).toEqual(["Battlefield", "Final Destination", "Yoshi's Story"]);
   });
 
-  it("clusters DB rows with stage ids and keeps raw rows out of later scopes when no games match", () => {
+  it("clusters DB rows by opponent conversion sequence and keeps raw rows out of later scopes when no games match", () => {
     const gameId = seedGame({
       replayPath: "C:/replays/openings-against-cluster.slp",
       replayHash: "openings-against-hash-cluster",
@@ -342,16 +383,43 @@ describe("getOpeningsAgainst", () => {
         relativeX: i % 2 === 0 ? 5 : 40,
         distance: i % 2 === 0 ? 20 : 80,
         victimX: i % 2 === 0 ? -40 : 55,
+        moveCount: i % 2 === 0 ? 1 : 2,
       }),
     );
-    persist(gameId, many);
+    const conversions: ConversionRecord[] = many.map((event, i) => ({
+      attackerSlot: 1,
+      startFrame: event.startFrame,
+      endFrame: event.endFrame,
+      startPercent: 0,
+      endPercent: event.damage,
+      damage: event.damage,
+      moveCount: event.moveCount,
+      openerMoveId: event.openerMoveId,
+      lastMoveId: i % 2 === 0 ? 6 : 13,
+      openingType: "neutral-win",
+      didKill: event.didKill,
+      moves:
+        i % 2 === 0
+          ? [{ frame: event.startFrame + 2, moveId: 6, damage: event.damage }]
+          : [
+              { frame: event.startFrame + 2, moveId: 54, damage: 8 },
+              { frame: event.startFrame + 20, moveId: 13, damage: Math.max(0, event.damage - 8) },
+            ],
+    }));
+    persist(gameId, many, 0, conversions);
 
     const result = getOpeningsAgainst({ stage: "Battlefield" });
     expect(result.coverage.gamesWithOpenings).toBe(1);
     expect(result.baseline.total).toBe(42);
     expect(result.clusters.status).toBe("ok");
     if (result.clusters.status === "ok") {
-      expect(result.clusters.clusters.reduce((sum, c) => sum + c.size, 0)).toBe(42);
+      const group = result.clusters.groups[0]!;
+      expect(group.opponentCharacter).toBe("Marth");
+      expect(group.n).toBe(42);
+      expect(group.withSequence).toBe(42);
+      expect(group.withoutSequence).toBe(0);
+      expect(group.clusters.reduce((sum, cluster) => sum + cluster.size, 0)).toBe(42);
+      expect(group.clusters.map((cluster) => cluster.label).sort()).toEqual(["dash attack", "grab (bthrow) · nair"]);
     }
     expect(result.examples).toHaveLength(10);
     expect(result.examples[0]!.timestamp).toMatch(/^\d+:\d{2}$/);
@@ -359,6 +427,22 @@ describe("getOpeningsAgainst", () => {
     const otherStage = getOpeningsAgainst({ stage: "Dream Land" });
     expect(otherStage.coverage.gamesInScope).toBe(0);
     expect(otherStage.baseline.total).toBe(0);
+  });
+
+  it("NEGATIVE: reports missing conversion move lists instead of inventing conversion sequences", () => {
+    const gameId = seedGame();
+    persist(
+      gameId,
+      Array.from({ length: 30 }, (_, i) => opening({ startFrame: 100 + i * 4 })),
+    );
+
+    const result = getOpeningsAgainst();
+    expect(result.baseline.total).toBe(30);
+    expect(result.clusters.status).toBe("insufficient-sample");
+    if (result.clusters.status === "insufficient-sample") {
+      expect(result.clusters.reason).toBe("no-sequences");
+      expect(result.clusters.n).toBe(30);
+    }
   });
 });
 

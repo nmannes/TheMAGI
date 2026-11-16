@@ -4,7 +4,8 @@
 // Usage:
 //   npm run openings -- [--target <tag>] [--character <char>] [--opponent <char>]
 //                       [--stage <stage>] [--opponent-key <tag|code>]
-//                       [--limit <n>] [--k <2-6>] [--no-clusters] [--json]
+//                       [--percent-band <band>] [--limit <n>] [--no-clusters]
+//                       [--bands] [--json]
 //                       [--render | --send] [--bucket <n> | --cluster <n>]
 //                       [--clips <n>] [--resolution <r>] [--out <dir>]
 //
@@ -14,9 +15,10 @@
 // target rather than re-perspectiving stored rows.
 //
 // --render/--send turn the selected rule bucket (default: the most frequent)
-// or shape cluster into headless Slippi clips. Clips show the opening hit with
-// 5s lead-in and 2s follow-through, matching the chronological hit-review
-// event. --send delivers through Telegram using TELEGRAM_BOT_TOKEN/CHAT_ID.
+// or conversion-sequence cluster into headless Slippi clips. Clips show the opening
+// hit with 5s lead-in and 2s follow-through, matching the chronological
+// hit-review event. --send delivers through Telegram using
+// TELEGRAM_BOT_TOKEN/CHAT_ID.
 
 import fs from "node:fs";
 import os from "node:os";
@@ -33,6 +35,7 @@ import {
   type OpeningsAgainstFilters,
   type OpeningsAgainstResult,
 } from "./openingsAgainst";
+import { OPENING_PERCENT_BANDS, openingPercentBand } from "./pipeline/openingClusters";
 import { sendTelegramVideo, telegramConfigFromEnv, type TelegramConfig } from "./telegram";
 
 interface ClipOptions {
@@ -42,7 +45,7 @@ interface ClipOptions {
   clips: number;
   /** 1-based position in the printed rule-bucket list. */
   bucket: number | null;
-  /** Shape-cluster display id. */
+  /** Conversion-sequence cluster display id. */
   cluster: number | null;
   resolution: string;
   outDir: string | null;
@@ -55,6 +58,7 @@ interface CliOptions {
   target: string | null;
   filters: OpeningsAgainstFilters;
   noClusters: boolean;
+  showBands: boolean;
   json: boolean;
   clip: ClipOptions;
 }
@@ -62,7 +66,8 @@ interface CliOptions {
 const USAGE = `Usage:
   npm run openings -- [--target <tag>] [--character <char>] [--opponent <char>]
                       [--stage <stage>] [--opponent-key <tag|code>]
-                      [--limit <n>] [--k <2-6>] [--no-clusters] [--json]
+                      [--percent-band <band>] [--limit <n>] [--no-clusters]
+                      [--bands] [--json]
                       [--render | --send] [--bucket <n> | --cluster <n>]
                       [--clips <n>] [--resolution <r>] [--out <dir>]
 
@@ -71,14 +76,16 @@ const USAGE = `Usage:
   --opponent      Only games against this opponent character
   --stage         Only games on this stage
   --opponent-key  Only games against this opponent tag or connect code
+  --percent-band  Only openings in one pre-hit victim-percent band
+                  (${OPENING_PERCENT_BANDS.map((b) => b.key).join(", ")})
   --limit         Most recent scoped games (default ${OPENINGS_AGAINST_DEFAULT_LIMIT}, max ${OPENINGS_AGAINST_MAX_LIMIT})
-  --k             Force the number of shape clusters (2-6) instead of silhouette selection
-  --no-clusters   Skip the descriptive shape-cluster section
+  --no-clusters   Skip the conversion-sequence cluster section
+  --bands         Print each conversion sequence's pre-hit percent distribution
   --json          Print the raw result as JSON
   --render        Render clip(s) for a selected bucket/cluster (default: most frequent bucket)
   --send          Render and send the clip(s) to Telegram (requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
   --bucket        Rule bucket to clip, by its 1-based position in this output
-  --cluster       Shape cluster to clip, by its displayed id (requires a valid cluster)
+  --cluster       Conversion-sequence cluster to clip, by its displayed id (requires a valid cluster)
   --clips         Maximum examples to render/send (default 1)
   --resolution    480p/720p/1080p/1440p/2160p or a raw EFBScale (default: 720p)
   --out           Clip output directory (default ~/.magi-melee/hit-review)
@@ -102,6 +109,7 @@ function parseArgs(argv: string[]): CliOptions {
   const filters: OpeningsAgainstFilters = {};
   let target: string | null = null;
   let noClusters = false;
+  let showBands = false;
   let json = false;
   let clipsSpecified = false;
   const clip: ClipOptions = {
@@ -143,20 +151,28 @@ function parseArgs(argv: string[]): CliOptions {
       case "--opponent-key":
         filters.opponentKey = next();
         break;
+      case "--percent-band": {
+        const raw = next();
+        const band = openingPercentBand(raw);
+        if (!band) {
+          fail(
+            `--percent-band expects one of ${OPENING_PERCENT_BANDS.map((b) => b.key).join(", ")} (or a band label), got "${raw}".`,
+          );
+        }
+        filters.percentBand = band.key;
+        break;
+      }
       case "--limit": {
         const limit = parseInteger(next(), "--limit");
         if (limit < 1) fail("--limit must be at least 1.");
         filters.limit = limit;
         break;
       }
-      case "--k": {
-        const k = parseInteger(next(), "--k");
-        if (k < 2 || k > 6) fail("--k must be between 2 and 6.");
-        filters.clusterK = k;
-        break;
-      }
       case "--no-clusters":
         noClusters = true;
+        break;
+      case "--bands":
+        showBands = true;
         break;
       case "--json":
         json = true;
@@ -212,7 +228,7 @@ function parseArgs(argv: string[]): CliOptions {
   if (clip.bucket != null && clip.cluster != null) fail("Choose either --bucket or --cluster, not both.");
   if (clipsSpecified && !clip.render) fail("--bucket/--cluster/--clips require --render or --send.");
 
-  return { target, filters, noClusters, json, clip };
+  return { target, filters, noClusters, showBands, json, clip };
 }
 
 const pct = (rate: number): string => `${Math.round(rate * 100)}%`;
@@ -223,6 +239,9 @@ function scopeText(filters: OpeningsAgainstFilters): string {
   if (filters.opponentCharacter) parts.push(`vs ${filters.opponentCharacter}`);
   if (filters.stage) parts.push(`on ${filters.stage}`);
   if (filters.opponentKey) parts.push(`vs opponent ${filters.opponentKey}`);
+  if (filters.percentBand) {
+    parts.push(`at ${openingPercentBand(filters.percentBand)?.label ?? filters.percentBand}`);
+  }
   return parts.join(" · ");
 }
 
@@ -259,6 +278,14 @@ function printRun(result: OpeningsAgainstResult, options: CliOptions, target: st
   );
   console.log(`By situation: ${baseline.situations.map((s) => `${s.key} ${s.count} (${pct(s.share)})`).join(", ")}`);
   console.log(`By opener family: ${baseline.families.map((f) => `${f.key} ${f.count} (${pct(f.share)})`).join(", ")}`);
+  console.log(
+    `By victim percent at the first hit: ${baseline.percentBands
+      .map(
+        (band) =>
+          `${band.label} ${band.count} (${band.kills} kill${band.kills === 1 ? "" : "s"}, ${pct(band.killRate)})`,
+      )
+      .join(", ")}`,
+  );
 
   console.log("\n--- Rule buckets (situation · family · move) ---");
   for (const bucket of result.buckets) {
@@ -274,23 +301,41 @@ function printRun(result: OpeningsAgainstResult, options: CliOptions, target: st
   }
 
   if (!options.noClusters) {
-    console.log("\n--- Shape clusters (descriptive; recomputed per query, never persisted) ---");
+    console.log(
+      "\n--- Conversion sequences by opponent (recorded hits of the full conversion, which can include resets and " +
+        "tech chases — not a verified true combo; descriptive, recomputed per query, never persisted; exact sequences " +
+        `need ${EVENT_SAMPLE_GUARDS.openingsBucketMin}+ openings, rarer continuations are grouped by first move) ---`,
+    );
     if (result.clusters.status === "insufficient-sample") {
       console.log(
-        result.clusters.reason === "n-below-40"
+        result.clusters.reason === "n-below-25"
           ? `  Insufficient sample: ${result.clusters.n} openings; clusters need ${result.clusters.required}.`
-          : `  No valid partition at k 2-6 with minimum cluster size ${result.clusters.minClusterSize}.`,
+          : `  No opening in this scope has a recorded conversion move list, so there are no conversion sequences to show.`,
       );
     } else {
-      for (const cluster of result.clusters.clusters) {
-        console.log(
-          `  #${cluster.id} ${cluster.label} — ${cluster.size} (${pct(cluster.share)}) · mostly ${cluster.dominantSituation} · ${cluster.dominantFamily} · ${cluster.dominantOpenerLabel} · kill ${pct(cluster.killRate)} · avg ${cluster.avgDamage.toFixed(1)} damage · ${cluster.distinctGames} games`,
-        );
-      }
-      if (result.clusters.weakSeparation) {
-        console.log(
-          `  Weak separation (silhouette ${result.clusters.silhouette.toFixed(2)}): a rough map of where openings happen, not separate habits.`,
-        );
+      for (const group of result.clusters.groups) {
+        const lowN = group.lowSample ? `  [low n: < ${EVENT_SAMPLE_GUARDS.openingsTotalMin}]` : "";
+        const missing = group.withoutSequence > 0 ? ` · ${group.withoutSequence} without a move list` : "";
+        console.log(`\n  vs ${group.opponentCharacter} — ${group.n} openings${missing}${lowN}`);
+        if (group.clusters.length === 0) {
+          console.log("    No recorded conversion move lists in this group.");
+          continue;
+        }
+        for (const cluster of group.clusters) {
+          const tail =
+            cluster.kind === "tail" ? ` · ${cluster.variants} sequence${cluster.variants === 1 ? "" : "s"}` : "";
+          const low = cluster.size < EVENT_SAMPLE_GUARDS.openingsBucketMin ? "  [low n]" : "";
+          console.log(
+            `    #${cluster.id} ${cluster.label} — ${cluster.size} (${pct(cluster.share)} of vs-${group.opponentCharacter} with move lists) · ${cluster.kills} kill${cluster.kills === 1 ? "" : "s"} (${pct(cluster.killRate)}) · avg ${cluster.avgDamage.toFixed(1)} damage · victim % ${Math.round(cluster.percentP25)}–${Math.round(cluster.percentP75)} (median ${Math.round(cluster.percentMedian)}) · ${cluster.distinctGames} game${cluster.distinctGames === 1 ? "" : "s"}${tail}${low}`,
+          );
+          if (options.showBands) {
+            console.log(
+              `        % bands: ${cluster.percentBands
+                .map((band) => `${band.label} ${band.count}${band.kills > 0 ? ` (${band.kills}K)` : ""}`)
+                .join(" · ")}`,
+            );
+          }
+        }
       }
     }
   }

@@ -4,8 +4,8 @@
 // records the moment the opening started — what the victim was doing on the
 // frame before the first hit, where both players stood, and how the first hit
 // was delivered. Rule-based buckets (openingClusters.ts) and descriptive
-// shape clusters both read these rows, filtered by the player's character,
-// the opponent's character and the stage.
+// conversion-sequence clusters both read these rows, filtered by the player's
+// character, the opponent's character and the stage.
 //
 // Melee/data constraints (see docs/melee-accuracy.md):
 //  - conversion.startFrame is the first stun/grab frame. For a grab it is the
@@ -276,6 +276,11 @@ export function extractOpeningEvents(
       stockNumber,
       deathFrame,
       deathVerdict,
+      // The full conversion's ordered move ids are the conversion-sequence
+      // evidence used by openingClusters.ts. Omitted when the parser
+      // recorded no damaging hits (the opener check above already skips
+      // those, so this is a guard, not a normal case).
+      ...(c.moves.length > 0 ? { moveIds: c.moves.map((m) => m.moveId) } : {}),
     });
   }
 

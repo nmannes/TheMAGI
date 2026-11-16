@@ -105,14 +105,17 @@ npx tsx src/setup.ts --tag YourTag --code "TAG#123" --folder path/to/replays
 # Watch a replay folder outside the desktop UI
 npx tsx src/watcher.ts path/to/replays --target "TAG#123"
 
-# Openings against you: rule buckets plus descriptive shape clusters
+# Openings against you: rule buckets plus conversion sequences by opponent
 npm run openings -- --character Fox --opponent Marth --limit 200
+
+# Scope every section to one pre-hit victim-percent band, and print each
+# sequence's percent distribution
+npm run openings -- --opponent Falco --percent-band 0-30 --bands
 
 # Machine-readable opening report
 npm run openings -- --json
 
-# Force three clusters, or skip clustering entirely
-npm run openings -- --k 3
+# Skip the conversion-sequence section entirely
 npm run openings -- --no-clusters
 
 # Render a clip for the most frequent opening bucket, or send it to Telegram
@@ -121,9 +124,9 @@ npm run openings -- --send --bucket 1 --clips 2
 npm run openings -- --send --cluster 2 --resolution 480p
 ```
 
-The opening CLI reads the v18 `opening_events` table, so the games must be imported (or backfilled) with the current detector version. `--target` verifies the configured target player; stored rows are resolved against that target at import time and cannot be re-perspectived by the flag.
+The opening CLI reads the v18 `opening_events` table, so the games must be imported (or backfilled) with the current detector version. `--target` verifies the configured target player; stored rows are resolved against that target at import time and cannot be re-perspectived by the flag. `--percent-band` accepts `0-30`, `30-60`, `60-90`, `90-120`, `120+` (or their labels) and filters before aggregation, so coverage, buckets, sequences, and examples all describe that band. Bands are half-open: 29 stays in 0–30% and 30 starts 30–60%. `--bands` adds each sequence's band counts and kills; the sequence summary always includes its p25–p75 and median pre-hit percent.
 
-`--render` and `--send` use the same headless Slippi playback path as the hit-review CLI: 5 seconds before the opening event frame and 2 seconds after it, capped at the replay's last frame. Without `--bucket` or `--cluster` the most frequent rule bucket is used; examples come from that bucket/cluster newest-first. `--send` requires `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the environment (the daily hit-review wrapper loads them from `key.env`).
+`--render` and `--send` use the same headless Slippi playback path as the hit-review CLI: 5 seconds before the opening event frame and 2 seconds after it, capped at the replay's last frame. Without `--bucket` or `--cluster` the most frequent rule bucket is used; examples come from that bucket/cluster newest-first. `--cluster` refers to a conversion-sequence cluster by the displayed id, not a rule bucket. `--send` requires `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the environment (the daily hit-review wrapper loads them from `key.env`).
 
 Database-backed Node CLIs can report `NODE_MODULE_VERSION` after native packages have been rebuilt for Electron. The backfill command above deliberately runs through Electron's Node runtime to avoid that mismatch.
 
@@ -151,7 +154,7 @@ MAGI uses three application layers:
 
 | Path                                 | Responsibility                                                                                                                              |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/main/`                          | Electron startup, IPC registration, handlers, updater, dialogs, native Windows game and replay embedding, and the application window.                |
+| `src/main/`                          | Electron startup, IPC registration, handlers, updater, dialogs, native Windows game and replay embedding, and the application window.       |
 | `src/preload/`                       | Typed bridge between Electron and React.                                                                                                    |
 | `src/renderer/`                      | React pages, components, hooks, stores, themes, assets, and styles.                                                                         |
 | `src/pipeline/`                      | Slippi parsing, frame/event extraction, derived insights, character data, signatures, highlights, and prompt assembly.                      |

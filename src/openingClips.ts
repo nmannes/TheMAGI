@@ -1,10 +1,11 @@
 // Selecting and describing a clip for the opening ledger.
 //
-// The openings CLI uses this module to turn a chosen rule bucket or shape
-// cluster into concrete clip examples. Buckets are authoritative; clusters are
-// exploratory and are selected only by their display id for this query. The
-// clip itself shows the opening hit with lead-in and follow-through, matching
-// the chronological hit-review "opening hit taken" event.
+// The openings CLI uses this module to turn a chosen rule bucket or
+// conversion-sequence cluster into concrete clip examples. Buckets are
+// authoritative; clusters are exploratory and are selected only by their
+// display id for this query. The clip itself shows the opening hit with
+// lead-in and follow-through, matching the chronological hit-review "opening
+// hit taken" event.
 
 import { Frames } from "@slippi/slippi-js/node";
 
@@ -22,7 +23,7 @@ export const OPENING_CLIP_MAX_FRAMES = 20 * FPS;
 export interface OpeningClipSelectionOptions {
   /** 1-based position in the printed rule-bucket list. */
   bucket?: number | null;
-  /** Shape-cluster display id (1-based, recomputed per query). */
+  /** Conversion-sequence cluster display id (1-based, unique across opponent groups, recomputed per query). */
   cluster?: number | null;
   /** Maximum examples to clip (default 1). */
   limit?: number;
@@ -76,28 +77,32 @@ export function selectOpeningClipExamples(
   if (options.cluster != null) {
     if (result.clusters.status === "insufficient-sample") {
       throw new OpeningClipSelectionError(
-        result.clusters.reason === "n-below-40"
-          ? `Shape clusters need ${result.clusters.required} openings in this scope; ${result.clusters.n} so far. Use --bucket instead.`
-          : `No shape cluster was valid at k 2–6 with minimum cluster size ${result.clusters.minClusterSize}. Use --bucket instead.`,
+        result.clusters.reason === "n-below-25"
+          ? `Conversion-sequence clusters need ${result.clusters.required} openings in this scope; ${result.clusters.n} so far. Use --bucket instead.`
+          : "No opening in this scope has a recorded conversion move list, so there are no conversion sequences to clip. Use --bucket instead.",
       );
     }
-    const cluster = result.clusters.clusters.find((candidate) => candidate.id === options.cluster);
+    const clusters = result.clusters.groups.flatMap((group) => group.clusters);
+    const cluster = clusters.find((candidate) => candidate.id === options.cluster);
     if (!cluster) {
-      const ids = result.clusters.clusters.map((candidate) => candidate.id).join(", ");
-      throw new OpeningClipSelectionError(`No shape cluster #${options.cluster}. Valid ids: ${ids}.`);
+      const ids = clusters.map((candidate) => candidate.id).join(", ");
+      throw new OpeningClipSelectionError(`No conversion-sequence cluster #${options.cluster}. Valid ids: ${ids}.`);
     }
     const examples = clipExamples(cluster.examples, limit);
     if (examples.length === 0) {
       throw new OpeningClipSelectionError(
-        `Shape cluster #${cluster.id} has no navigable examples. Choose another source.`,
+        `Conversion-sequence cluster #${cluster.id} has no navigable examples. Choose another source.`,
       );
     }
     return {
       source: "cluster",
       id: cluster.id,
-      title: `${cluster.dominantSituation} · ${cluster.dominantFamily} · ${cluster.dominantOpenerLabel}`,
+      title: `vs ${cluster.opponentCharacter} · ${cluster.label}`,
       context:
-        `shape cluster #${cluster.id} ${cluster.label} · ${cluster.size} openings (${Math.round(cluster.share * 100)}%)` +
+        `conversion sequence #${cluster.id} · vs ${cluster.opponentCharacter} · ${cluster.size} openings` +
+        (cluster.kind === "tail" ? ` across ${cluster.variants} sequence${cluster.variants === 1 ? "" : "s"}` : "") +
+        ` (${Math.round(cluster.share * 100)}% of vs-${cluster.opponentCharacter} openings with move lists)` +
+        ` · victim % ${Math.round(cluster.percentP25)}–${Math.round(cluster.percentP75)} (median ${Math.round(cluster.percentMedian)})` +
         ` · ${cluster.distinctGames} game${cluster.distinctGames === 1 ? "" : "s"}`,
       examples,
     };

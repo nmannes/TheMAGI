@@ -12,8 +12,9 @@ import {
 import type {
   OpeningBaseline,
   OpeningBucket,
-  OpeningClusterSummary,
   OpeningExample,
+  OpeningPercentBand,
+  OpeningSequenceCluster,
 } from "../src/pipeline/openingClusters";
 import type { OpeningsAgainstResult } from "../src/openingsAgainst";
 import { FPS } from "../src/pipeline/helpers";
@@ -57,24 +58,45 @@ function bucket(overrides: Partial<OpeningBucket> = {}): OpeningBucket {
   };
 }
 
-function cluster(overrides: Partial<OpeningClusterSummary> = {}): OpeningClusterSummary {
+function bands(size: number): OpeningPercentBand[] {
+  const defs = [
+    ["0-30", "0–30%"],
+    ["30-60", "30–60%"],
+    ["60-90", "60–90%"],
+    ["90-120", "90–120%"],
+    ["120+", "120%+"],
+  ] as const;
+  return defs.map(([key, label], index) => {
+    const count = Math.floor(size / defs.length) + (index < size % defs.length ? 1 : 0);
+    return { key, label, count, kills: 0, killRate: 0 };
+  });
+}
+
+function cluster(overrides: Partial<OpeningSequenceCluster> = {}): OpeningSequenceCluster {
   return {
     id: 1,
+    opponentCharacter: "Marth",
+    kind: "exact",
+    sequence: ["dair", "dair", "nair"],
+    label: "dair · dair · nair",
     size: 22,
     share: 0.22,
-    percentMean: 48,
-    percentMedian: 45,
-    distanceMean: 3.2,
-    corneredShare: 0.3,
-    onPlatformShare: 0.1,
-    dominantSituation: "neutral-grounded",
-    dominantFamily: "grounded",
-    dominantOpenerLabel: "dash attack",
+    kills: 4,
     killRate: 0.18,
     avgDamage: 24,
+    avgMoveCount: 3,
+    percentMean: 48,
+    percentMedian: 45,
+    percentP25: 30,
+    percentP75: 60,
+    percentBands: bands(22),
+    corneredShare: 0.3,
+    onPlatformShare: 0.1,
     distinctGames: 9,
-    examples: [example({ situation: "neutral-grounded", openerFamily: "grounded", openerLabel: "dash attack" })],
-    label: "Close range · 30–60% · center",
+    dominantSituation: "neutral-grounded",
+    dominantFamily: "aerial",
+    variants: 1,
+    examples: [example({ openerFamily: "aerial", openerLabel: "dair" })],
     ...overrides,
   };
 }
@@ -100,12 +122,28 @@ function result(overrides: Partial<OpeningsAgainstResult> = {}): OpeningsAgainst
     buckets: [bucket()],
     clusters: {
       status: "ok",
-      n: 100,
-      k: 2,
-      minClusterSize: 8,
-      silhouette: 0.42,
-      weakSeparation: false,
-      clusters: [cluster(), cluster({ id: 2, size: 78, share: 0.78, label: "Mid range · 60–90% · side" })],
+      groups: [
+        {
+          opponentCharacter: "Marth",
+          n: 100,
+          withSequence: 100,
+          withoutSequence: 0,
+          lowSample: false,
+          clusters: [
+            cluster(),
+            cluster({
+              id: 2,
+              size: 78,
+              share: 0.78,
+              sequence: ["fair", "fair", "nair"],
+              label: "fair · fair · nair",
+              dominantFamily: "aerial",
+              percentBands: bands(78),
+              examples: [example({ openerLabel: "fair" })],
+            }),
+          ],
+        },
+      ],
     },
     examples: [example()],
     options: { characters: ["Fox"], opponentCharacters: ["Marth"], stages: ["Battlefield"] },
@@ -152,27 +190,71 @@ describe("selectOpeningClipExamples", () => {
     ]);
   });
 
-  it("selects a shape cluster by its displayed id", () => {
+  it("selects a conversion-sequence cluster by its displayed id", () => {
     const selected = selectOpeningClipExamples(result(), { cluster: 2 });
     expect(selected.source).toBe("cluster");
     expect(selected.id).toBe(2);
-    expect(selected.title).toBe("neutral-grounded · grounded · dash attack");
-    expect(selected.context).toContain("shape cluster #2");
+    expect(selected.title).toBe("vs Marth · fair · fair · nair");
+    expect(selected.context).toContain("conversion sequence #2");
     expect(selected.context).toContain("78 openings");
+    expect(selected.context).toContain("78% of vs-Marth openings with move lists");
+    expect(selected.context).toContain("victim % 30–60 (median 45)");
     expect(selected.examples).toHaveLength(1);
+  });
+
+  it("describes a tail cluster by its first move and continuation count", () => {
+    const selected = selectOpeningClipExamples(
+      result({
+        clusters: {
+          status: "ok",
+          groups: [
+            {
+              opponentCharacter: "Falco",
+              n: 40,
+              withSequence: 40,
+              withoutSequence: 0,
+              lowSample: false,
+              clusters: [
+                cluster({
+                  id: 1,
+                  opponentCharacter: "Falco",
+                  kind: "tail",
+                  sequence: ["down b"],
+                  label: "down b · …",
+                  size: 12,
+                  share: 0.3,
+                  variants: 4,
+                  percentBands: bands(12),
+                }),
+              ],
+            },
+          ],
+        },
+      }),
+      { cluster: 1 },
+    );
+    expect(selected.title).toBe("vs Falco · down b · …");
+    expect(selected.context).toContain("across 4 sequences");
   });
 
   it("NEGATIVE: rejects an insufficient cluster sample instead of clipping an arbitrary event", () => {
     const insufficient = result({
-      clusters: { status: "insufficient-sample", reason: "n-below-40", n: 12, required: 40, minClusterSize: 8 },
+      clusters: { status: "insufficient-sample", reason: "n-below-25", n: 12, required: 25 },
     });
-    expect(() => selectOpeningClipExamples(insufficient, { cluster: 1 })).toThrow(/need 40 openings.*12 so far/i);
+    expect(() => selectOpeningClipExamples(insufficient, { cluster: 1 })).toThrow(/need 25 openings.*12 so far/i);
+
+    const noSequences = result({ clusters: { status: "insufficient-sample", reason: "no-sequences", n: 40 } });
+    expect(() => selectOpeningClipExamples(noSequences, { cluster: 1 })).toThrow(/no conversion sequences to clip/i);
   });
 
   it("NEGATIVE: rejects both selectors, missing bucket positions and missing cluster ids", () => {
-    expect(() => selectOpeningClipExamples(result(), { bucket: 1, cluster: 1 })).toThrow(/either --bucket or --cluster/);
+    expect(() => selectOpeningClipExamples(result(), { bucket: 1, cluster: 1 })).toThrow(
+      /either --bucket or --cluster/,
+    );
     expect(() => selectOpeningClipExamples(result(), { bucket: 2 })).toThrow(/No rule bucket #2.*1–1/);
-    expect(() => selectOpeningClipExamples(result(), { cluster: 9 })).toThrow(/No shape cluster #9.*1, 2/);
+    expect(() => selectOpeningClipExamples(result(), { cluster: 9 })).toThrow(
+      /No conversion-sequence cluster #9.*1, 2/,
+    );
   });
 
   it("NEGATIVE: reports when the scope has no openings to clip", () => {

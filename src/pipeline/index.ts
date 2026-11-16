@@ -22,19 +22,24 @@ export { extractOpeningEvents } from "./openingEvents.js";
 export {
   aggregateOpeningBuckets,
   clusterOpenings,
+  openingPercentBand,
+  openingSequenceLabels,
   sortOpeningBuckets,
   summarizeOpenings,
+  OPENING_PERCENT_BANDS,
   OPENING_SITUATION_ORDER,
   OPENING_FAMILY_ORDER,
 } from "./openingClusters.js";
 export type {
   OpeningBucket,
   OpeningBaseline,
-  OpeningClusterResult,
-  OpeningClusterSummary,
-  OpeningClusterOptions,
   OpeningExample,
+  OpeningOpponentSequenceGroup,
   OpeningPercentBand,
+  OpeningPercentBandKey,
+  OpeningSequenceCluster,
+  OpeningSequenceClusterResult,
+  OpeningSequenceKind,
 } from "./openingClusters.js";
 export {
   getAerialFrameData,

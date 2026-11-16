@@ -5,15 +5,17 @@
 //
 // The unit is the first hit in neutral of an opponent conversion where the
 // target player is the victim. Aggregates come from the v18 opening_events
-// table (victim_is_player = 1) joined to games for the scope filters. Rule
-// buckets are authoritative and stable; clusters are exploratory and are
-// recomputed per query, never persisted and never used as filters.
+// table (victim_is_player = 1) joined to games for the scope filters; the
+// opponent's full conversion move list is joined from conversions.moves_json
+// for the conversion-sequence clusters. Rule buckets are authoritative and stable;
+// clusters are exploratory and are recomputed per query, never persisted and
+// never used as filters.
 
 import type {
   OpeningBaseline,
   OpeningBucket,
-  OpeningClusterResult,
   OpeningExample,
+  OpeningSequenceClusterResult,
 } from "./pipeline/openingClusters.js";
 
 export interface OpeningsAgainstFilters {
@@ -25,10 +27,14 @@ export interface OpeningsAgainstFilters {
   stage?: string;
   /** Opponent connect code or tag (same key as getAggregateStats). */
   opponentKey?: string;
+  /**
+   * Narrow openings to one pre-hit victim-percent band. Accepts an
+   * OPENING_PERCENT_BANDS key ("0-30", "30-60", "60-90", "90-120", "120+")
+   * or its display label. Bands are descriptive, not combo-validity cutoffs.
+   */
+  percentBand?: string;
   /** Most recent scoped games to read (default 200, max 1000). */
   limit?: number;
-  /** Force the cluster count (2-6) instead of selecting k by silhouette. */
-  clusterK?: number;
 }
 
 export interface OpeningsAgainstCoverage {
@@ -52,8 +58,8 @@ export interface OpeningsAgainstResult {
   baseline: OpeningBaseline;
   /** situation × opener family × exact move, sorted by count. */
   buckets: OpeningBucket[];
-  /** Deterministic shape clusters, or an explicit insufficient-sample result. */
-  clusters: OpeningClusterResult;
+  /** Opponent conversion-sequence clusters per opponent character, or an explicit insufficient-sample result. */
+  clusters: OpeningSequenceClusterResult;
   /** The most recent openings across the scope (game id, frame, timestamp). */
   examples: OpeningExample[];
   /** Distinct values available in the full DB, for filter selects. */

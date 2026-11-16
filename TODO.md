@@ -14,7 +14,7 @@ Feature-development tracker. The checkbox trees are the source of truth for prog
 
 ### Why
 
-MAGI persists opponent conversions (`conversions.attacker_is_player = 0`) and rich per-instance events, but nothing groups the moment an opening starts by situation, move, position, or percent, and nothing links it to cost/outcome. This feature shows the openings the player keeps losing ("what I keep on falling for") through two parallel grouping views: explainable rule-based buckets and deterministic statistical shape clusters.
+MAGI persists opponent conversions (`conversions.attacker_is_player = 0`) and rich per-instance events, but nothing groups the moment an opening starts by situation, move, position, or percent, and nothing links it to cost/outcome. This feature shows the openings the player keeps losing ("what I keep on falling for") through two parallel grouping views: explainable rule-based buckets and descriptive conversion-sequence clusters grouped by the opponent character.
 
 ### Definition (Melee-accurate)
 
@@ -68,23 +68,25 @@ Indexes: `(game_id)`, `(game_id, victim_is_player)`, `(victim_is_player, situati
 - Sort by count; offer a "most costly" sort by raw kill count (no invented composite score).
 - Sample guards: add `openingsBucketMin` (8) and `openingsTotalMin` (25) to `EVENT_SAMPLE_GUARDS`. Low-n rows are returned but marked/dimmed, never hidden silently.
 
-**Statistical (exploratory, descriptive)** — same module, hand-rolled deterministic k-means (no new dependency):
+**Conversion sequences (exploratory, descriptive)** — same module, deterministic grouping by the opponent's ordered moves:
 
-- Numeric feature vector: victim percent, relative x/y in the victim-facing frame, distance, victim x normalized to stage ledge, on-platform. Rule-based `situation`/`opener_family` are **not** inputs; the methods stay parallel and independent. Clusters are characterized by dominant situation/move afterward.
-- Deterministic seeded k-means++ initialization, seed derived from sorted event ids, so the same filtered set always produces the same clusters.
-- k tried from 2 to 6, chosen by silhouette on a deterministic sample (cap ~500 points); minimum cluster size `max(8, ceil(0.05n))`; require `n ≥ 40` or return an explicit `insufficient-sample` reason.
-- Output: size/share, mean/median percent, distance, cornered share, dominant situation/family/exact move, kill rate, average damage, distinct games, examples, and `weakSeparation` when the best silhouette is poor.
-- Labels describe measurements only (e.g. "Close range · 20–50% · center"), never a named technique. Cluster ids are **not persisted** and never used for Library filters or cached coaching; they are recomputed per query.
+- Group openings by opponent character, then by the ordered `moveId` list of the full conversion the opening started. The move list is reconstructed from `conversions.moves_json` by joining on game/start/end/move count/opener move; the parsed first move must equal the opening's `opener_move_id` or the row is left without a sequence. No move list means no sequence — never inferred from a looser hit order.
+- Exact sequences with at least `EVENT_SAMPLE_GUARDS.openingsBucketMin` (8) openings become exact clusters, labeled `fair · fair · nair`. Rarer sequences merge into one tail cluster per first label (`side b · …`) with a `variants` count, so a broad scope cannot flood the view with single-instance groups.
+- Labels preserve order, repeats, and the opening ledger's grab/projectile notation (`grab (bthrow) · fair`). Unmapped move ids are labeled `move #<id>` rather than guessed.
+- Require `n ≥ 25` (`openingsTotalMin`) or return an explicit `insufficient-sample` reason; groups below 25 openings are flagged `lowSample`.
+- Output: size/share, kill rate, average damage, average move count, pre-hit percent mean/median and middle 50% (p25–p75), cornered/on-platform share, distinct games, dominant situation/family, variants, examples.
+- Percent distribution per sequence: counts and kills in five half-open bands — `[0, 30)`, `[30, 60)`, `[60, 90)`, `[90, 120)`, `[120, ∞)`. Percent is the pre-hit victim percent, never the end of the conversion; bands are descriptive, not combo-validity thresholds. A `percentBand` filter scopes the whole query (baseline, buckets, sequences, examples) to one band before aggregation.
+- Labels are measurements, never techniques. Cluster ids are **not persisted** and never used for Library filters or cached coaching; they are recomputed per query.
 
 ### Surfaces
 
-1. **Shared contract** `src/openingsAgainst.ts`: filters (`character`, `opponentCharacter`, `stage`, `opponentKey`, game `limit` default 200/max 1000), coverage (`gamesInScope`, `gamesWithOpenings`), baseline, buckets, clusters, examples. Mirrors `src/characterEventProfile.ts`.
+1. **Shared contract** `src/openingsAgainst.ts`: filters (`character`, `opponentCharacter`, `stage`, `opponentKey`, pre-hit `percentBand`, game `limit` default 200/max 1000), coverage (`gamesInScope`, `gamesWithOpenings`), baseline, buckets, clusters, examples. Mirrors `src/characterEventProfile.ts`.
 2. **DB + IPC**: `getOpeningsAgainst(filters)` in `src/db.ts` (scoped by games, version-gated by the new rows, raw rows loaded once and aggregated/clustered in TS); `stats:openingsAgainst` registered with `safeHandle` in `src/main/handlers/stats.ts`; expose in `src/preload/index.ts`; type in `src/renderer/global.d.ts`; add `useOpeningsAgainst` in `src/renderer/hooks/queries.ts`.
-3. **Performance Lab**: new section `src/renderer/pages/performance/OpeningsAgainst.tsx` (plus CSS), inserted after "What to act on" in `PerformanceLab.tsx`. Rule buckets grouped like `HabitLedger.tsx` (situation sections, share bars, kill-rate column, low-n dimming); cluster cards below; filters (recency, your character, opponent character, stage); coverage warning when some games predate the backfill; examples click through to `/game/:id` with `{ seekFrame }` like `Library.tsx`.
+3. **Performance Lab**: new section `src/renderer/pages/performance/OpeningsAgainst.tsx` (plus CSS), inserted after "What to act on" in `PerformanceLab.tsx`. Rule buckets grouped like `HabitLedger.tsx` (situation sections, share bars, kill-rate column, low-n dimming); cluster cards below; filters (recency, your character, opponent character, stage, pre-hit percent band); a scoped percent-band distribution above the list and per-sequence band charts; coverage warning when some games predate the backfill; examples click through to `/game/:id` with `{ seekFrame }` like `Library.tsx`.
 4. **Library**: add an `opening` bucket filter to `LibraryGameFilters` / `buildLibraryWhere` using `EXISTS` on `opening_events` (`victim_is_player = 1`, matching `situation` + `opener_family`); return distinct bucket options in the response; add the select to `Library.tsx` and `library/filter.ts`; include it in clear-filters state.
-5. **Coaching prompt**: extend `PatternData` (`src/pipeline/patterns.ts`) with `openingsAgainst { total, games, kills, buckets[] }`; fill from `patternsFromFrameEvents` (this game/set), `mergePatternData`, and `getPatternData` (DB history, same scope/current-version gating). Add a compact "Openings against you" section to `formatRecurringPatterns` and `formatPatternBreakdown`, with sample guards. Add one prompt instruction line so the coach names the repeated door, its n-of cost, and a replacement. Statistical clusters stay out of the prompt (unstable by dataset; descriptive view only). Bump `COACHING_PROMPT_VERSION` 4 → 5.
-6. **CLI**: `src/openings-cli.ts` with `--target`, `--character`, `--opponent`, `--stage`, `--limit`, `--k`, `--no-clusters`, `--json`; prints coverage, rule buckets, statistical clusters, and top examples. Add an `openings` npm script and document the command. Follows the `stats.ts` standalone CLI pattern.
-7. **Clip delivery**: `--render`/`--send` selects a rule bucket (default: most frequent) or shape cluster and renders its newest examples with the chronological opening-hit bounds (5 seconds before, 2 seconds after, capped at the replay's last frame). Rendering is shared with hit-review (`src/clipRender.ts`); `--send` delivers through Telegram. Captions state the measured situation/family/move, sample size, pre-hit percent, and the full conversion's damage and stock outcome. This path needs the SQLite ledger, unlike chronological hit-review.
+5. **Coaching prompt**: extend `PatternData` (`src/pipeline/patterns.ts`) with `openingsAgainst { total, games, kills, buckets[] }`; fill from `patternsFromFrameEvents` (this game/set), `mergePatternData`, and `getPatternData` (DB history, same scope/current-version gating). Add a compact "Openings against you" section to `formatRecurringPatterns` and `formatPatternBreakdown`, with sample guards. Add one prompt instruction line so the coach names the repeated door, its n-of cost, and a replacement. Conversion-sequence clusters stay out of the prompt (descriptive view only). Bump `COACHING_PROMPT_VERSION` 4 → 5.
+6. **CLI**: `src/openings-cli.ts` with `--target`, `--character`, `--opponent`, `--stage`, `--limit`, `--percent-band`, `--bands`, `--no-clusters`, `--json`; prints coverage, the scoped pre-hit percent distribution, rule buckets, conversion-sequence clusters by opponent with p25–p75/median (and per-band counts with `--bands`), and top examples. Add an `openings` npm script and document the command. Follows the `stats.ts` standalone CLI pattern.
+7. **Clip delivery**: `--render`/`--send` selects a rule bucket (default: most frequent) or conversion-sequence cluster and renders its newest examples with the chronological opening-hit bounds (5 seconds before, 2 seconds after, capped at the replay's last frame). Rendering is shared with hit-review (`src/clipRender.ts`); `--send` delivers through Telegram. Captions state the measured bucket/sequence, sample size, pre-hit percent, and the full conversion's damage and stock outcome. This path needs the SQLite ledger, unlike chronological hit-review.
 
 ### Tasks
 
@@ -122,18 +124,21 @@ Indexes: `(game_id)`, `(game_id, victim_is_player)`, `(victim_is_player, situati
 - [x] Tests: schema/migration/index/helper assertions in `tests/db.test.ts`
 - [x] Test: persist mapping for both `victim_is_player` perspectives
 
-#### 3. Rule buckets and statistical clustering
+#### 3. Rule buckets and conversion-sequence clustering
 
 - [x] `aggregateOpeningBuckets` with count, share, kills, kill rate, avg damage, avg follow-up hits, cornered share, distinct games, examples
 - [x] Percent bands and cornered/on-platform qualifier splits
 - [x] Add `openingsBucketMin` + `openingsTotalMin` to `EVENT_SAMPLE_GUARDS`
-- [x] Deterministic k-means: numeric shape features only, seeded from sorted event ids
-- [x] k selection 2–6 by silhouette on a deterministic sample, min cluster size guard
-- [x] `n ≥ 40` guard with explicit `insufficient-sample` reason
-- [x] `weakSeparation` flag and descriptive (non-technique) cluster labels
+- [x] Reconstruct each opening's ordered move ids from `conversions.moves_json` with a first-move guard
+- [x] Group exact sequences per opponent character; 8+ openings stay exact, rarer sequences merge into a first-move tail cluster with a `variants` count
+- [x] `n ≥ 25` guard with explicit `insufficient-sample` reasons (`n-below-25`, `no-sequences`); per-group `lowSample`
+- [x] Descriptive (non-technique) labels preserving order, repeats, grab/projectile notation, and unmapped ids as `move #<id>`
+- [x] Tests: exact/tail grouping, opponent separation, order/repeat preservation, global cluster ids
 - [x] Tests: bucket counts/rates/guards
-- [x] Tests: determinism under shuffling; k/min-size/insufficient-sample guards
-- [x] Tests: cluster descriptors pick the correct dominant situation/move
+- [x] Tests: determinism under shuffling; insufficient-sample, missing-sequence, and low-sample guards
+- [x] Tests: DB join populates sequences; openings without move lists report `no-sequences`
+- [x] Pre-hit percent distribution per sequence (mean/median/p25–p75, five half-open bands with counts and kills)
+- [x] Tests: half-open band boundaries, counts partition the sequence size, quartiles
 
 #### 4. Query, contract, and IPC
 
@@ -144,12 +149,15 @@ Indexes: `(game_id)`, `(game_id, victim_is_player)`, `(victim_is_player, situati
 - [x] Type in `src/renderer/global.d.ts`
 - [x] Add `useOpeningsAgainst` React Query hook
 - [x] Tests: seeded temp-DB perspective isolation, filters, coverage, version gating
+- [x] `percentBand` filter (key or display label) applied to rows before aggregation
+- [x] Tests: band scoping and half-open boundaries; unknown band rejected
 
 #### 5. UI
 
 - [x] Performance Lab `OpeningsAgainst.tsx` rule-bucket sections (HabitLedger-style)
 - [x] Cluster cards with descriptors, sample counts, weak-separation note
-- [x] Filters: recency, your character, opponent character, stage
+- [x] Filters: recency, your character, opponent character, stage, pre-hit percent band
+- [x] Scoped percent distribution chart and per-sequence band chart
 - [x] Coverage warning + backfill hint when games predate the backfill
 - [x] Example chips navigate to `/game/:id` with `seekFrame`
 - [x] Insert section into `PerformanceLab.tsx`
@@ -171,16 +179,17 @@ Indexes: `(game_id)`, `(game_id, victim_is_player)`, `(victim_is_player, situati
 
 #### 7. CLI
 
-- [x] Add `src/openings-cli.ts` (`--target`, `--character`, `--opponent`, `--stage`, `--limit`, `--k`, `--no-clusters`, `--json`)
-- [x] Print coverage, rule buckets, clusters, top examples
+- [x] Add `src/openings-cli.ts` (`--target`, `--character`, `--opponent`, `--stage`, `--limit`, `--no-clusters`, `--json`)
+- [x] Print coverage, rule buckets, conversion sequences by opponent, top examples
 - [x] Add `--render`/`--send` clip delivery for a selected bucket or cluster (`--bucket`, `--cluster`, `--clips`)
 - [x] Shared renderer extracted to `src/clipRender.ts`; clip selection/caption logic in `src/openingClips.ts`
 - [x] Add `openings` npm script
+- [x] Add `--percent-band` and `--bands`; print the scoped distribution and sequence quartiles
 - [x] Document the command and clip delivery
 
 #### 8. Docs and release
 
-- [x] `docs/melee-accuracy.md`: opening definition, situation/family states, grab/trade handling, cluster caveats
+- [x] `docs/melee-accuracy.md`: opening definition, situation/family states, grab/trade handling, cluster caveats, percent-band semantics
 - [x] `docs/DEVELOPMENT.md`: new event table, version bump, backfill note
 - [x] `CLAUDE.md`: module and command bullets
 - [x] `README.md`: feature bullet
