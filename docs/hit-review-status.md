@@ -126,19 +126,20 @@ because the cursor only moves after delivery succeeds.
   instead of rsyncing. `key.env`, `docker.env` and `data/` were restored as
   untracked runtime files after the clone, and the clone reports a clean
   `git status` at the pushed commit.
-- The clip job runs **locally** from cron at 08:17, 14:17 and 20:17:
-  `17 8,14,20 * * * bash /home/nathan/scratch/clippi/scripts/hit-review-daily.sh >> ~/.magi-melee/hit-review.log 2>&1`.
-  A dry run with a cron-minimal environment (`env -i`) confirmed the wrapper
-  resolves Node through `HIT_REVIEW_PATH` and picks the next two events after
-  the cursor. Local render + Telegram delivery was verified earlier the same
-  day; the first scheduled run is the final cron-path proof.
+- The clip job runs **locally** from cron every hour at :17:
+  `17 * * * * bash /home/nathan/scratch/clippi/scripts/hit-review-daily.sh >> ~/.magi-melee/hit-review.log 2>&1`,
+  with `HIT_REVIEW_LIMIT=1` in `key.env`, so one clip is delivered per hour
+  (24/day). A dry run with a cron-minimal environment (`env -i`) confirmed the
+  wrapper resolves Node through `HIT_REVIEW_PATH` and selects the next event
+  after the cursor. Local render + Telegram delivery was verified earlier the
+  same day; the first scheduled run is the final cron-path proof.
 - `scripts/sync-replays-clyde.sh` runs locally from cron at :07 and :37 and
   mirrors `~/Slippi` to `clyde:~/Slippi` with `--ignore-existing`.
 
 ## What is next
 
 1. **First scheduled run.** Check `~/.magi-melee/hit-review.log` and Telegram
-   after 08:17 to confirm the cron path renders and delivers two clips.
+   after the next :17 to confirm the cron path renders and delivers a clip.
 2. **Docker verification.** Build the image and run the same two-clip query
    with real mounts, since the container path now defaults to
    `/data/hit-review-cursor.json`.
