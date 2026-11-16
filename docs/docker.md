@@ -155,7 +155,18 @@ docker run --rm --init \
 
 ## Schedule it
 
-The container exits after each run, so use the host's cron or a systemd timer:
+The container exits after each run, so use the host's cron or a systemd timer.
+`scripts/hit-review-docker.sh` wraps `docker compose run` with the host paths
+pinned, so the cron entry stays short:
+
+```cron
+17 * * * * bash /opt/clippi/scripts/hit-review-docker.sh >> /var/log/hit-review.log 2>&1
+```
+
+It defaults to `~/Slippi`, `~/clippi-assets`, and the repo's `data/` folder;
+override with `HOST_REPLAYS_DIR`, `HOST_ASSETS_DIR`, and `HOST_DATA_DIR`, and
+rebuild the image after source changes with `scripts/hit-review-docker.sh
+--build`. The explicit form, if you prefer it in cron:
 
 ```cron
 17 20 * * * cd /opt/clippi && HOST_REPLAYS_DIR=/srv/slippi HOST_ASSETS_DIR=/opt/hit-review-assets HOST_DATA_DIR=/srv/hit-review docker compose run --rm hit-review >> /var/log/hit-review.log 2>&1
