@@ -60,7 +60,7 @@ CI runs type checking, tests, lint, and formatting on pull requests and pushes t
 
 ## Historical Replay Backfill
 
-New imports automatically populate MAGI's detailed event tables. Games imported before those tables were introduced, or parsed by older event detectors, need a backfill for the full Character analytics suite and for AI coaching history, including measured DI, recovery routes, shield decisions, habit instances, and whiff-punish data.
+New imports automatically populate MAGI's detailed event tables. Games imported before those tables were introduced, or parsed by older event detectors, need a backfill for the full Character analytics suite and for AI coaching history, including measured DI, recovery routes, shield decisions, habit instances, whiff-punish data, and the neutral opening ledger (`opening_events`).
 
 Each game records the detector version that wrote its event rows. A plain run processes games with no event data and games parsed by an older detector version; `--force` reprocesses everything. Until a game is reprocessed, coaching history leaves out its death verdicts and habit punish rates instead of mixing old and new definitions.
 
@@ -104,7 +104,26 @@ npx tsx src/setup.ts --tag YourTag --code "TAG#123" --folder path/to/replays
 
 # Watch a replay folder outside the desktop UI
 npx tsx src/watcher.ts path/to/replays --target "TAG#123"
+
+# Openings against you: rule buckets plus descriptive shape clusters
+npm run openings -- --character Fox --opponent Marth --limit 200
+
+# Machine-readable opening report
+npm run openings -- --json
+
+# Force three clusters, or skip clustering entirely
+npm run openings -- --k 3
+npm run openings -- --no-clusters
+
+# Render a clip for the most frequent opening bucket, or send it to Telegram
+npm run openings -- --render
+npm run openings -- --send --bucket 1 --clips 2
+npm run openings -- --send --cluster 2 --resolution 480p
 ```
+
+The opening CLI reads the v18 `opening_events` table, so the games must be imported (or backfilled) with the current detector version. `--target` verifies the configured target player; stored rows are resolved against that target at import time and cannot be re-perspectived by the flag.
+
+`--render` and `--send` use the same headless Slippi playback path as the hit-review CLI: 5 seconds before the opening event frame and 2 seconds after it, capped at the replay's last frame. Without `--bucket` or `--cluster` the most frequent rule bucket is used; examples come from that bucket/cluster newest-first. `--send` requires `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the environment (the daily hit-review wrapper loads them from `key.env`).
 
 Database-backed Node CLIs can report `NODE_MODULE_VERSION` after native packages have been rebuilt for Electron. The backfill command above deliberately runs through Electron's Node runtime to avoid that mismatch.
 

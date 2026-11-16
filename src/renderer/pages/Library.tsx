@@ -8,6 +8,7 @@ import { Pill, PillRow } from "../components/ui/Pill";
 import { ResultDot } from "../components/ui/ResultDot";
 import { EmptyState } from "../components/ui/EmptyState";
 import { LibraryFilters, LibraryGame } from "./library/filter";
+import { prettyLabel } from "./characters/shared";
 
 const RESULTS: Array<LibraryFilters["result"]> = ["all", "win", "loss"];
 const PAGE_SIZE = 100;
@@ -20,12 +21,13 @@ export function Library({ refreshKey: _ }: { refreshKey: number }) {
   const [char, setChar] = useState<LibraryFilters["char"]>("all");
   const [stage, setStage] = useState<LibraryFilters["stage"]>("all");
   const [result, setResult] = useState<LibraryFilters["result"]>("all");
+  const [opening, setOpening] = useState<LibraryFilters["opening"]>("all");
   const [page, setPage] = useState(0);
   const deferredSearch = useDeferredValue(search);
 
   useEffect(() => {
     setPage(0);
-  }, [deferredSearch, char, stage, result]);
+  }, [deferredSearch, char, stage, result, opening]);
 
   const filters = useMemo(
     () => ({
@@ -33,10 +35,11 @@ export function Library({ refreshKey: _ }: { refreshKey: number }) {
       char,
       stage,
       result,
+      opening,
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     }),
-    [deferredSearch, char, stage, result, page],
+    [deferredSearch, char, stage, result, opening, page],
   );
 
   const { data, isLoading, isError, refetch, isFetching } = useLibraryGames(filters);
@@ -55,13 +58,15 @@ export function Library({ refreshKey: _ }: { refreshKey: number }) {
     }
   }, [page, pageCount]);
 
-  const filtersActive = search.trim() !== "" || char !== "all" || stage !== "all" || result !== "all";
+  const filtersActive =
+    search.trim() !== "" || char !== "all" || stage !== "all" || result !== "all" || opening !== "all";
 
   const clearFilters = () => {
     setSearch("");
     setChar("all");
     setStage("all");
     setResult("all");
+    setOpening("all");
     setPage(0);
   };
 
@@ -149,6 +154,22 @@ export function Library({ refreshKey: _ }: { refreshKey: number }) {
               {(data?.stages ?? []).map((s) => (
                 <option key={s} value={s}>
                   {s}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <div className="tweaks-label">Opening faced</div>
+            <select
+              value={opening}
+              onChange={(e) => setOpening(e.target.value)}
+              className="library-filter-input"
+              aria-label="Filter games by an opening against you"
+            >
+              <option value="all">All openings</option>
+              {(data?.openingFilters ?? []).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {prettyLabel(option.situation)} · {prettyLabel(option.family)} ({option.count})
                 </option>
               ))}
             </select>

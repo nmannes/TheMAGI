@@ -7,8 +7,21 @@ import os from "os";
 import fs from "fs";
 import type { AggregateStats, PlayerHistory } from "./pipeline/index.js";
 import type { CharacterEventProfile } from "./characterEventProfile.js";
-import { moveIdToName } from "./pipeline/helpers.js";
+import { moveIdToName, stageIdFromName } from "./pipeline/helpers.js";
 import { FRAME_EVENTS_VERSION } from "./pipeline/frameEvents.js";
+import type { OpeningEvent } from "./pipeline/frameEvents.js";
+import {
+  aggregateOpeningBuckets,
+  clusterOpenings,
+  openingExample,
+  summarizeOpenings,
+} from "./pipeline/openingClusters.js";
+import {
+  OPENINGS_AGAINST_DEFAULT_LIMIT,
+  OPENINGS_AGAINST_MAX_LIMIT,
+  type OpeningsAgainstFilters,
+  type OpeningsAgainstResult,
+} from "./openingsAgainst.js";
 import type { PatternData } from "./pipeline/patterns.js";
 import { buildReplaySearchTerms, buildReplaySignatureSearchKeys } from "./replaySearch.js";
 
@@ -314,6 +327,44 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_stock_deaths_game ON stock_deaths(game_id);
   CREATE INDEX IF NOT EXISTS idx_habit_instances_game ON habit_instances(game_id);
   CREATE INDEX IF NOT EXISTS idx_habit_instances_lookup ON habit_instances(is_player, situation, option);
+
+  CREATE TABLE IF NOT EXISTS opening_events (
+    id INTEGER PRIMARY KEY,
+    game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    victim_is_player INTEGER NOT NULL,
+    start_frame INTEGER NOT NULL,
+    end_frame INTEGER,
+    opener_move_id INTEGER,
+    opener_label TEXT NOT NULL,
+    opener_family TEXT NOT NULL,
+    grab INTEGER NOT NULL DEFAULT 0,
+    opening_type TEXT NOT NULL,
+    traded INTEGER NOT NULL DEFAULT 0,
+    situation TEXT NOT NULL,
+    victim_state INTEGER NOT NULL,
+    attacker_state INTEGER NOT NULL,
+    victim_percent REAL NOT NULL,
+    attacker_percent REAL NOT NULL,
+    victim_x REAL NOT NULL,
+    victim_y REAL NOT NULL,
+    attacker_x REAL NOT NULL,
+    attacker_y REAL NOT NULL,
+    relative_x REAL NOT NULL,
+    relative_y REAL NOT NULL,
+    distance REAL NOT NULL,
+    cornered INTEGER NOT NULL DEFAULT 0,
+    on_platform INTEGER NOT NULL DEFAULT 0,
+    damage REAL NOT NULL,
+    move_count INTEGER NOT NULL,
+    did_kill INTEGER NOT NULL DEFAULT 0,
+    stock_number INTEGER,
+    death_frame INTEGER,
+    death_verdict TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_opening_events_game ON opening_events(game_id);
+  CREATE INDEX IF NOT EXISTS idx_opening_events_game_victim ON opening_events(game_id, victim_is_player);
+  CREATE INDEX IF NOT EXISTS idx_opening_events_lookup ON opening_events(victim_is_player, situation, opener_family);
 `;
 
 // ── Migration system ─────────────────────────────────────────────────
@@ -719,6 +770,50 @@ const migrations: Migration[] = [
     description: "Relabel or drop highlights whose old detectors overclaimed; rebuild happens on backfill",
     up: (db) => {
       db.exec(REPAIR_HIGHLIGHT_LABELS_SQL);
+    },
+  },
+  {
+    version: 18,
+    description: "Per-instance opening ledger: first hit in neutral of every opponent conversion",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS opening_events (
+          id INTEGER PRIMARY KEY,
+          game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+          victim_is_player INTEGER NOT NULL,
+          start_frame INTEGER NOT NULL,
+          end_frame INTEGER,
+          opener_move_id INTEGER,
+          opener_label TEXT NOT NULL,
+          opener_family TEXT NOT NULL,
+          grab INTEGER NOT NULL DEFAULT 0,
+          opening_type TEXT NOT NULL,
+          traded INTEGER NOT NULL DEFAULT 0,
+          situation TEXT NOT NULL,
+          victim_state INTEGER NOT NULL,
+          attacker_state INTEGER NOT NULL,
+          victim_percent REAL NOT NULL,
+          attacker_percent REAL NOT NULL,
+          victim_x REAL NOT NULL,
+          victim_y REAL NOT NULL,
+          attacker_x REAL NOT NULL,
+          attacker_y REAL NOT NULL,
+          relative_x REAL NOT NULL,
+          relative_y REAL NOT NULL,
+          distance REAL NOT NULL,
+          cornered INTEGER NOT NULL DEFAULT 0,
+          on_platform INTEGER NOT NULL DEFAULT 0,
+          damage REAL NOT NULL,
+          move_count INTEGER NOT NULL,
+          did_kill INTEGER NOT NULL DEFAULT 0,
+          stock_number INTEGER,
+          death_frame INTEGER,
+          death_verdict TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_opening_events_game ON opening_events(game_id);
+        CREATE INDEX IF NOT EXISTS idx_opening_events_game_victim ON opening_events(game_id, victim_is_player);
+        CREATE INDEX IF NOT EXISTS idx_opening_events_lookup ON opening_events(victim_is_player, situation, opener_family);
+      `);
     },
   },
 ];
@@ -1307,6 +1402,85 @@ export function insertWhiffEvents(gameId: number, rows: WhiffEventRow[]): void {
   }
 }
 
+export interface OpeningEventRow {
+  victimIsPlayer: boolean;
+  startFrame: number;
+  endFrame: number | null;
+  openerMoveId: number | null;
+  openerLabel: string;
+  openerFamily: string;
+  grab: boolean;
+  openingType: string;
+  traded: boolean;
+  situation: string;
+  victimState: number;
+  attackerState: number;
+  victimPercent: number;
+  attackerPercent: number;
+  victimX: number;
+  victimY: number;
+  attackerX: number;
+  attackerY: number;
+  relativeX: number;
+  relativeY: number;
+  distance: number;
+  cornered: boolean;
+  onPlatform: boolean;
+  damage: number;
+  moveCount: number;
+  didKill: boolean;
+  stockNumber: number | null;
+  deathFrame: number | null;
+  deathVerdict: string | null;
+}
+
+export function insertOpeningEvents(gameId: number, rows: OpeningEventRow[]): void {
+  if (rows.length === 0) return;
+  const stmt = getDb().prepare(`
+    INSERT INTO opening_events (
+      game_id, victim_is_player, start_frame, end_frame, opener_move_id, opener_label,
+      opener_family, grab, opening_type, traded, situation, victim_state, attacker_state,
+      victim_percent, attacker_percent, victim_x, victim_y, attacker_x, attacker_y,
+      relative_x, relative_y, distance, cornered, on_platform, damage, move_count,
+      did_kill, stock_number, death_frame, death_verdict
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  for (const r of rows) {
+    stmt.run(
+      gameId,
+      r.victimIsPlayer ? 1 : 0,
+      r.startFrame,
+      r.endFrame,
+      r.openerMoveId,
+      r.openerLabel,
+      r.openerFamily,
+      r.grab ? 1 : 0,
+      r.openingType,
+      r.traded ? 1 : 0,
+      r.situation,
+      r.victimState,
+      r.attackerState,
+      r.victimPercent,
+      r.attackerPercent,
+      r.victimX,
+      r.victimY,
+      r.attackerX,
+      r.attackerY,
+      r.relativeX,
+      r.relativeY,
+      r.distance,
+      r.cornered ? 1 : 0,
+      r.onPlatform ? 1 : 0,
+      r.damage,
+      r.moveCount,
+      r.didKill ? 1 : 0,
+      r.stockNumber,
+      r.deathFrame,
+      r.deathVerdict,
+    );
+  }
+}
+
 // ── Backfill support ─────────────────────────────────────────────────
 
 export interface BackfillCandidate {
@@ -1362,6 +1536,7 @@ export function deleteFrameEventRows(gameId: number): void {
     "recovery_spans",
     "shield_blocks",
     "whiff_events",
+    "opening_events",
   ]) {
     db.prepare(`DELETE FROM ${table} WHERE game_id = ?`).run(gameId);
   }
@@ -1661,6 +1836,35 @@ export function getGameById(gameId: number): { id: number; replay_path: string; 
   `,
     )
     .get(gameId) as { id: number; replay_path: string; player_tag: string } | undefined;
+}
+
+/** Metadata needed to render and caption an opening-ledger clip. */
+export interface GameClipInfo {
+  id: number;
+  replayPath: string;
+  playedAt: string | null;
+  stage: string;
+  durationSeconds: number;
+  playerTag: string;
+  playerCharacter: string;
+  opponentTag: string;
+  opponentCharacter: string;
+}
+
+export function getGameClipInfo(gameIds: readonly number[]): GameClipInfo[] {
+  const ids = [...new Set(gameIds.filter((id) => Number.isInteger(id) && id > 0))];
+  if (ids.length === 0) return [];
+  return getDb()
+    .prepare(
+      `SELECT
+         g.id, g.replay_path as replayPath, g.played_at as playedAt, g.stage,
+         g.duration_seconds as durationSeconds,
+         g.player_tag as playerTag, g.player_character as playerCharacter,
+         g.opponent_tag as opponentTag, g.opponent_character as opponentCharacter
+       FROM games g
+       WHERE g.id IN (${ids.map(() => "?").join(", ")})`,
+    )
+    .all(...ids) as GameClipInfo[];
 }
 
 // ── Full game detail ──────────────────────────────────────────────
@@ -2539,8 +2743,18 @@ export interface LibraryGameFilters {
   char?: string;
   stage?: string;
   result?: string;
+  /** "situation::family" opening bucket, filtered via opening_events EXISTS. */
+  opening?: string;
   limit?: number;
   offset?: number;
+}
+
+export interface LibraryOpeningFilterOption {
+  /** Stable key for the select value: `${situation}::${family}`. */
+  value: string;
+  situation: string;
+  family: string;
+  count: number;
 }
 
 export interface LibraryGamesPage {
@@ -2553,6 +2767,7 @@ export interface LibraryGamesPage {
   charactersPlayed: number;
   characters: string[];
   stages: string[];
+  openingFilters: LibraryOpeningFilterOption[];
 }
 
 export interface LibrarySearchMatch {
@@ -2643,6 +2858,18 @@ function buildLibraryWhere(filters: LibraryGameFilters): {
   if (filters.result && filters.result !== "all") {
     conditions.push("g.result = ?");
     params.push(filters.result);
+  }
+  if (filters.opening && filters.opening !== "all") {
+    const [situation, family] = filters.opening.split("::");
+    if (situation && family) {
+      conditions.push(
+        "EXISTS (SELECT 1 FROM opening_events oe WHERE oe.game_id = g.id AND oe.victim_is_player = 1 AND oe.situation = ? AND oe.opener_family = ?)",
+      );
+      params.push(situation, family);
+    } else {
+      // A malformed bucket key must not silently widen the result set.
+      conditions.push("0");
+    }
   }
 
   return {
@@ -2818,6 +3045,18 @@ export function getLibraryGames(filters: LibraryGameFilters = {}): LibraryGamesP
     .all()
     .map((row: any) => row.value as string);
 
+  const openingFilters = db
+    .prepare(
+      `
+    SELECT oe.situation as situation, oe.opener_family as family, COUNT(*) as count
+    FROM opening_events oe
+    WHERE oe.victim_is_player = 1
+    GROUP BY oe.situation, oe.opener_family
+    ORDER BY count DESC, oe.situation ASC, oe.opener_family ASC
+  `,
+    )
+    .all() as Array<{ situation: string; family: string; count: number }>;
+
   return {
     games: gamesWithMatches,
     total: summary?.total ?? 0,
@@ -2828,6 +3067,12 @@ export function getLibraryGames(filters: LibraryGameFilters = {}): LibraryGamesP
     charactersPlayed: summary?.charactersPlayed ?? 0,
     characters,
     stages,
+    openingFilters: openingFilters.map((row) => ({
+      value: `${row.situation}::${row.family}`,
+      situation: row.situation,
+      family: row.family,
+      count: row.count,
+    })),
   };
 }
 
@@ -3469,6 +3714,20 @@ export function getPatternData(filters: PatternScopeFilters): PatternData | null
     WHERE ${IN_SCOPE("rs.game_id")} AND rs.recovering_is_player = 0
     GROUP BY rs.edgeguarder_depth`);
 
+  // Opening ledger rows only exist for games parsed at the current detector
+  // version, so openings use CURRENT (like death verdicts and habit punish).
+  const openingTotals = one<{ total: number; games: number; kills: number }>(`
+    SELECT COUNT(*) as total, COUNT(DISTINCT oe.game_id) as games, COALESCE(SUM(oe.did_kill), 0) as kills
+    FROM opening_events oe
+    WHERE ${CURRENT("oe.game_id")} AND oe.victim_is_player = 1`);
+  const openingBuckets = q<PatternData["openingsAgainst"]["buckets"][number]>(`
+    SELECT oe.situation as situation, oe.opener_family as family, oe.opener_label as label,
+      COUNT(*) as count, COALESCE(SUM(oe.did_kill), 0) as kills
+    FROM opening_events oe
+    WHERE ${CURRENT("oe.game_id")} AND oe.victim_is_player = 1
+    GROUP BY oe.situation, oe.opener_family, oe.opener_label
+    ORDER BY count DESC, kills DESC, oe.opener_label`);
+
   const shieldTaken = shieldByMove.reduce((s, m) => s + m.taken, 0);
   const shieldMissed = shieldByMove.reduce((s, m) => s + m.missed, 0);
 
@@ -3477,6 +3736,7 @@ export function getPatternData(filters: PatternScopeFilters): PatternData | null
     games: scopeRows.length,
     currentGames: currentIds.length,
     habits,
+    openingsAgainst: { ...openingTotals, buckets: openingBuckets },
     deaths: {
       total: deathTotals.total,
       verdicts,
@@ -3506,6 +3766,189 @@ export function getPatternData(filters: PatternScopeFilters): PatternData | null
       opportunities: byDepth.reduce((s, d) => s + d.total, 0),
       kills: byDepth.reduce((s, d) => s + d.kills, 0),
       byDepth,
+    },
+  };
+}
+
+// ── Openings against the player (v18 opening ledger) ─────────────────
+
+interface OpeningEventDbRow {
+  id: number;
+  gameId: number;
+  startFrame: number;
+  endFrame: number | null;
+  openerMoveId: number | null;
+  openerLabel: string;
+  openerFamily: string;
+  grab: number;
+  openingType: string;
+  traded: number;
+  situation: string;
+  victimState: number;
+  attackerState: number;
+  victimPercent: number;
+  attackerPercent: number;
+  victimX: number;
+  victimY: number;
+  attackerX: number;
+  attackerY: number;
+  relativeX: number;
+  relativeY: number;
+  distance: number;
+  cornered: number;
+  onPlatform: number;
+  damage: number;
+  moveCount: number;
+  didKill: number;
+  stockNumber: number | null;
+  deathFrame: number | null;
+  deathVerdict: string | null;
+}
+
+function toOpeningEvent(row: OpeningEventDbRow, stageId: number | null): OpeningEvent {
+  // The DB stores only victim_is_player; expose the target as slot 0 and the
+  // opponent as slot 1 so callers have a consistent perspective. Slot values
+  // in persisted rows are never used for filtering or rates.
+  const event: OpeningEvent = {
+    id: row.id,
+    gameId: row.gameId,
+    victimSlot: 0,
+    attackerSlot: 1,
+    startFrame: row.startFrame,
+    endFrame: row.endFrame,
+    openerMoveId: row.openerMoveId,
+    openerLabel: row.openerLabel,
+    openerFamily: row.openerFamily as OpeningEvent["openerFamily"],
+    grab: row.grab === 1,
+    openingType: row.openingType,
+    traded: row.traded === 1,
+    situation: row.situation as OpeningEvent["situation"],
+    victimState: row.victimState,
+    attackerState: row.attackerState,
+    victimPercent: row.victimPercent,
+    attackerPercent: row.attackerPercent,
+    victimX: row.victimX,
+    victimY: row.victimY,
+    attackerX: row.attackerX,
+    attackerY: row.attackerY,
+    relativeX: row.relativeX,
+    relativeY: row.relativeY,
+    distance: row.distance,
+    cornered: row.cornered === 1,
+    onPlatform: row.onPlatform === 1,
+    damage: row.damage,
+    moveCount: row.moveCount,
+    didKill: row.didKill === 1,
+    stockNumber: row.stockNumber,
+    deathFrame: row.deathFrame,
+    deathVerdict: row.deathVerdict as OpeningEvent["deathVerdict"],
+  };
+  if (stageId != null) event.stageId = stageId;
+  return event;
+}
+
+/**
+ * The openings the target player keeps getting hit by: first hits in neutral
+ * of opponent conversions where the player is the victim. Scoped by games
+ * (character/opponent/stage/opponent key) and by recency (limit = most recent
+ * scoped games, default 200, max 1000). Only games parsed by the current
+ * detector version contribute rows — the coverage block lets the UI warn when
+ * older games need a backfill. Rule buckets and shape clusters are computed
+ * from the same raw row set, loaded once.
+ */
+export function getOpeningsAgainst(filters: OpeningsAgainstFilters = {}): OpeningsAgainstResult {
+  const db = getDb();
+  const limit = Math.min(
+    Math.max(Math.floor(filters.limit ?? OPENINGS_AGAINST_DEFAULT_LIMIT), 1),
+    OPENINGS_AGAINST_MAX_LIMIT,
+  );
+
+  const conditions: string[] = [];
+  const params: Record<string, unknown> = { v: FRAME_EVENTS_VERSION, limit };
+  if (filters.character) {
+    conditions.push("g.player_character = @character");
+    params.character = filters.character;
+  }
+  if (filters.opponentCharacter) {
+    conditions.push("g.opponent_character = @opponentCharacter");
+    params.opponentCharacter = filters.opponentCharacter;
+  }
+  if (filters.stage) {
+    conditions.push("g.stage = @stage");
+    params.stage = filters.stage;
+  }
+  if (filters.opponentKey) {
+    conditions.push("(g.opponent_tag = @opponentKey OR g.opponent_connect_code = @opponentKey)");
+    params.opponentKey = filters.opponentKey;
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const scopeRows = db
+    .prepare(
+      `SELECT g.id as id, g.stage as stage, COALESCE(g.events_version, 1) >= @v as current
+       FROM games g
+       ${where}
+       ORDER BY COALESCE(g.played_at, '') DESC, g.id DESC
+       LIMIT @limit`,
+    )
+    .all(params) as { id: number; stage: string; current: number }[];
+
+  const currentRows = scopeRows.filter((row) => row.current);
+  const stageById = new Map(scopeRows.map((row) => [row.id, row.stage]));
+  let rows: OpeningEventDbRow[] = [];
+  if (currentRows.length > 0) {
+    const placeholders = currentRows.map(() => "?").join(", ");
+    rows = db
+      .prepare(
+        `SELECT
+           oe.id, oe.game_id as gameId, oe.start_frame as startFrame, oe.end_frame as endFrame,
+           oe.opener_move_id as openerMoveId, oe.opener_label as openerLabel,
+           oe.opener_family as openerFamily, oe.grab, oe.opening_type as openingType,
+           oe.traded, oe.situation, oe.victim_state as victimState,
+           oe.attacker_state as attackerState, oe.victim_percent as victimPercent,
+           oe.attacker_percent as attackerPercent, oe.victim_x as victimX,
+           oe.victim_y as victimY, oe.attacker_x as attackerX, oe.attacker_y as attackerY,
+           oe.relative_x as relativeX, oe.relative_y as relativeY, oe.distance,
+           oe.cornered, oe.on_platform as onPlatform, oe.damage, oe.move_count as moveCount,
+           oe.did_kill as didKill, oe.stock_number as stockNumber, oe.death_frame as deathFrame,
+           oe.death_verdict as deathVerdict
+         FROM opening_events oe
+         WHERE oe.victim_is_player = 1
+           AND oe.game_id IN (${placeholders})
+         ORDER BY oe.game_id, oe.start_frame, oe.id`,
+      )
+      .all(...currentRows.map((row) => row.id)) as OpeningEventDbRow[];
+  }
+
+  const events = rows.map((row) => toOpeningEvent(row, stageIdFromName(stageById.get(row.gameId) ?? "") ?? null));
+  const gamesWithOpenings = new Set(events.map((event) => event.gameId)).size;
+
+  const examples = [...events]
+    .sort((a, b) => (b.gameId ?? 0) - (a.gameId ?? 0) || b.startFrame - a.startFrame || (b.id ?? 0) - (a.id ?? 0))
+    .slice(0, 10)
+    .map(openingExample);
+
+  const distinctValues = (column: "player_character" | "opponent_character" | "stage"): string[] =>
+    (
+      db.prepare(`SELECT DISTINCT ${column} as value FROM games ORDER BY value ASC`).all() as {
+        value: string;
+      }[]
+    ).map((row) => row.value);
+
+  return {
+    coverage: {
+      gamesInScope: scopeRows.length,
+      gamesWithOpenings,
+      gamesParsedCurrent: currentRows.length,
+    },
+    baseline: summarizeOpenings(events),
+    buckets: aggregateOpeningBuckets(events),
+    clusters: clusterOpenings(events, filters.clusterK != null ? { k: filters.clusterK } : {}),
+    examples,
+    options: {
+      characters: distinctValues("player_character"),
+      opponentCharacters: distinctValues("opponent_character"),
+      stages: distinctValues("stage"),
     },
   };
 }

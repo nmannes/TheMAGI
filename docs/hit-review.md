@@ -49,6 +49,32 @@ An opening-hit event attributes a stock death to the opponent conversion when
 MAGI can match the conversion's final move and stock record. The event still
 shows only the opening hit; the caption reports the resulting stock.
 
+## Clipped openings from the ledger
+
+`npm run openings` can render the same "opening hit taken" clip for a rule
+bucket or shape cluster from the SQLite opening ledger. This path needs the
+desktop database (imported or backfilled games), unlike the chronological scan
+above:
+
+```bash
+# Most frequent rule bucket, newest example
+npm run openings -- --send
+
+# A specific rule bucket (1-based, as printed) or shape cluster
+npm run openings -- --send --bucket 1
+npm run openings -- --send --cluster 2
+
+# Render locally without Telegram, or take more examples
+npm run openings -- --render --bucket 2 --clips 3 --out ~/clips
+```
+
+Clips use 5 seconds of lead-in and 2 seconds after the opening event frame,
+the same bounds as the chronological opening-hit event. The caption names the
+measured bucket/cluster, its sample size, the pre-hit percent, and the full
+conversion's damage and stock outcome. `--send` reads `TELEGRAM_BOT_TOKEN` and
+`TELEGRAM_CHAT_ID` from the environment; the daily wrapper loads `key.env` for
+you, or export them in the shell first.
+
 ## Requirements
 
 - Linux (the renderer uses bash, Xvfb, and Slippi playback).

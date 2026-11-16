@@ -34,12 +34,33 @@ export interface PatternKiller {
   failedRecovery: number;
 }
 
+export interface PatternOpeningBucket {
+  situation: string;
+  family: string;
+  label: string;
+  count: number;
+  kills: number;
+}
+
+/**
+ * The first hit in neutral of opponent conversions where this player was the
+ * victim (see pipeline/openingEvents.ts). `games` counts games that contributed
+ * at least one opening; bucket counts are descriptive, never technique claims.
+ */
+export interface PatternOpeningsAgainst {
+  total: number;
+  games: number;
+  kills: number;
+  buckets: PatternOpeningBucket[];
+}
+
 export interface PatternData {
   label: string;
   games: number;
   /** Games whose death verdicts / habit punish flags come from the current detectors. */
   currentGames: number;
   habits: PatternHabit[];
+  openingsAgainst: PatternOpeningsAgainst;
   deaths: {
     total: number;
     verdicts: Record<string, number>;
@@ -88,6 +109,19 @@ const HELPFUL_DI = new Set(["GOOD_DI", "OK_DI"]);
 
 /** Measured patterns for one player in one game, in the same shape as the DB history. */
 export function patternsFromFrameEvents(events: GameFrameEvents, slot: PlayerSlot, label: string): PatternData {
+  const openings = events.openings.filter((o) => o.victimSlot === slot);
+  const openingBuckets: PatternOpeningBucket[] = [
+    ...countBy(openings, (o) => `${o.situation}\u0000${o.openerFamily}\u0000${o.openerLabel}`).values(),
+  ]
+    .map((list) => ({
+      situation: list[0]!.situation,
+      family: list[0]!.openerFamily,
+      label: list[0]!.openerLabel,
+      count: list.length,
+      kills: list.filter((o) => o.didKill).length,
+    }))
+    .sort((a, b) => b.count - a.count || b.kills - a.kills || a.label.localeCompare(b.label));
+
   const habits: PatternHabit[] = [
     ...countBy(
       events.habits.filter((h) => h.playerSlot === slot),
@@ -190,6 +224,12 @@ export function patternsFromFrameEvents(events: GameFrameEvents, slot: PlayerSlo
     games: 1,
     currentGames: 1,
     habits,
+    openingsAgainst: {
+      total: openings.length,
+      games: openings.length > 0 ? 1 : 0,
+      kills: openings.filter((o) => o.didKill).length,
+      buckets: openingBuckets,
+    },
     deaths: { total: deaths.length, verdicts, resourceFaults: deaths.filter((d) => d.resourceFault).length, byKiller },
     throwDI,
     whiffCapture: {
@@ -258,6 +298,22 @@ export function mergePatternData(parts: PatternData[], label: string): PatternDa
         punished: a.punished + b.punished,
       }),
     ),
+    openingsAgainst: {
+      total: sum((p) => p.openingsAgainst.total),
+      games: sum((p) => p.openingsAgainst.games),
+      kills: sum((p) => p.openingsAgainst.kills),
+      buckets: mergeBy(
+        parts.map((p) => p.openingsAgainst.buckets),
+        (b) => `${b.situation}\u0000${b.family}\u0000${b.label}`,
+        (a, b) => ({
+          situation: a.situation,
+          family: a.family,
+          label: a.label,
+          count: a.count + b.count,
+          kills: a.kills + b.kills,
+        }),
+      ).sort((a, b) => b.count - a.count || b.kills - a.kills || a.label.localeCompare(b.label)),
+    },
     deaths: {
       total: sum((p) => p.deaths.total),
       verdicts,
@@ -536,6 +592,63 @@ function deathSection(columns: Column[]): string[] {
   return out;
 }
 
+function openingsSection(columns: Column[]): string[] {
+  const out: string[] = [];
+  const any = columns.some((c) => c.data.openingsAgainst.total > 0);
+  if (!any) return out;
+  const broad = columns.filter((c) => !c.single).at(-1)?.data ?? columns[0]!.data;
+
+  out.push(
+    "Openings against you — the first hit in neutral of each opponent conversion where you were the victim (a grab counts at the grab frame, not the throw; follow-up combo hits, ledge/offstage hits and SDs are excluded):",
+  );
+
+  const volume = columns
+    .map((col) => {
+      const o = col.data.openingsAgainst;
+      if (o.total === 0) return null;
+      if (col.single) {
+        return `${col.data.label} ${o.total} in ${col.data.games} game${col.data.games === 1 ? "" : "s"}`;
+      }
+      const perGame = col.data.games > 0 ? (o.total / col.data.games).toFixed(1) : null;
+      return `${col.data.label} ${o.total} in ${o.games} of ${col.data.games} games${perGame != null ? ` (${perGame}/game)` : ""}`;
+    })
+    .filter((x): x is string => x != null);
+  if (volume.length > 0) out.push(`  Openings: ${volume.join(" · ")}`);
+
+  const killRate = line(
+    "Openings that took the stock",
+    compareRate(
+      columns,
+      (d) => (d.openingsAgainst.total > 0 ? { n: d.openingsAgainst.kills, d: d.openingsAgainst.total } : null),
+      EVENT_SAMPLE_GUARDS.openingsTotalMin,
+    ),
+  );
+  if (killRate) out.push(killRate);
+
+  const doorMin = EVENT_SAMPLE_GUARDS.openingsBucketMin;
+  const doors = broad.openingsAgainst.buckets.filter((b) => b.count >= doorMin).slice(0, 5);
+  if (doors.length > 0) {
+    out.push(
+      `  Most frequent doors (${broad.label}; situation · opener): ` +
+        doors
+          .map(
+            (b) => `${b.situation} · ${b.family} · ${b.label} x${b.count} (${b.kills} kill${b.kills === 1 ? "" : "s"})`,
+          )
+          .join("; "),
+    );
+  }
+  if (broad.openingsAgainst.total < EVENT_SAMPLE_GUARDS.openingsTotalMin) {
+    out.push(
+      `  Low n: ${broad.openingsAgainst.total} openings in ${broad.label} — describe these, do not call any of them a habit.`,
+    );
+  } else if (doors.length === 0) {
+    out.push(
+      `  No single opening bucket reaches ${doorMin} occurrences in ${broad.label}; the openings are spread across too many situations to name one door.`,
+    );
+  }
+  return out;
+}
+
 /**
  * The cross-game block. Columns: this game (optional), matchup history
  * (optional), character history. Returns [] when there is no history at all.
@@ -574,6 +687,9 @@ export function formatRecurringPatterns(
     const s = habitSection(columns, situation);
     if (s.length > 0) lines.push(...s, "");
   }
+
+  const openings = openingsSection(columns);
+  if (openings.length > 0) lines.push(...openings, "");
 
   const d = deathSection(columns);
   if (d.length > 0) lines.push(...d, "");
@@ -733,6 +849,8 @@ export function formatPatternBreakdown(rows: PatternData[]): string[] {
     const punished = p.habits.reduce((s, h) => s + h.punished, 0);
     const habitCell = cell(punished, punishedOf, EVENT_SAMPLE_GUARDS.habitSituationMin);
     if (habitCell) parts.push(`ledge/knockdown/OOS options punished ${habitCell}`);
+    const openings = cell(p.openingsAgainst.kills, p.openingsAgainst.total, EVENT_SAMPLE_GUARDS.openingsTotalMin);
+    if (openings) parts.push(`openings against you → kill ${openings}`);
     const noDI = cell(p.deaths.verdicts.NO_DI ?? 0, p.deaths.total, EVENT_SAMPLE_GUARDS.deathVerdictMin);
     if (noDI) parts.push(`deaths with no DI input ${noDI}`);
     const capture = cell(p.whiffCapture.punished, p.whiffCapture.opportunities, EVENT_SAMPLE_GUARDS.whiffCaptureMin);

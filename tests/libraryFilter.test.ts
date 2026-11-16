@@ -18,7 +18,7 @@ describe("filterGames", () => {
     G({ id: 3, opponentTag: "mang0", opponentCharacter: "Fox", stage: "Dream Land", result: "win" }),
   ];
 
-  const base: LibraryFilters = { search: "", char: "all", stage: "all", result: "all" };
+  const base: LibraryFilters = { search: "", char: "all", stage: "all", result: "all", opening: "all" };
 
   it("returns all games when filters are default", () => {
     expect(filterGames(games, base).map((g) => g.id)).toEqual([1, 2, 3]);

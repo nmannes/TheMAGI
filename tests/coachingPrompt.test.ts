@@ -7,6 +7,7 @@ import {
   SYSTEM_PROMPT,
   SYSTEM_PROMPT_AGGREGATE,
   formatRecurringPatterns,
+  mergePatternData,
   patternsFromFrameEvents,
   type PatternData,
 } from "../src/pipeline";
@@ -23,6 +24,7 @@ function emptyPatterns(label: string, games = 50): PatternData {
     games,
     currentGames: games,
     habits: [],
+    openingsAgainst: { total: 0, games: 0, kills: 0, buckets: [] },
     deaths: { total: 0, verdicts: {}, resourceFaults: 0, byKiller: [] },
     throwDI: [],
     whiffCapture: { opportunities: 0, punished: 0, unpunishedByMove: [] },
@@ -44,9 +46,27 @@ function withLedge(base: PatternData, roll: number, total: number): PatternData 
   };
 }
 
+function withOpenings(
+  base: PatternData,
+  total: number,
+  kills: number,
+  buckets: PatternData["openingsAgainst"]["buckets"],
+): PatternData {
+  return {
+    ...base,
+    openingsAgainst: { total, games: total > 0 ? base.games : 0, kills, buckets },
+  };
+}
+
 describe("coaching system prompts (v2)", () => {
   it("asks for findings, not recaps, in the headings the coaching cards understand", () => {
-    for (const heading of ["## The Read", "## Fix This First", "## Also Worth Fixing", "## Exploit Next Game", "## Practice Plan"]) {
+    for (const heading of [
+      "## The Read",
+      "## Fix This First",
+      "## Also Worth Fixing",
+      "## Exploit Next Game",
+      "## Practice Plan",
+    ]) {
       expect(SYSTEM_PROMPT).toContain(heading);
     }
     expect(SYSTEM_PROMPT).not.toContain("## Game Overview");
@@ -108,7 +128,9 @@ describe("formatRecurringPatterns", () => {
     const game = { ...withLedge(emptyPatterns("this game", 1), 4, 5), currentGames: 1 };
     const history = withLedge(emptyPatterns("all Marth"), 20, 100);
     const text = formatRecurringPatterns({ character: history, matchup: null }, game).join("\n");
-    expect(text).toMatch(/roll — share: this game 4\/5 \(80%\) · all Marth 20% of 100 {2}◄ this game \+60 pts vs usual/);
+    expect(text).toMatch(
+      /roll — share: this game 4\/5 \(80%\) · all Marth 20% of 100 {2}◄ this game \+60 pts vs usual/,
+    );
   });
 
   it("NEGATIVE: does not flag a this-game rate with too few samples", () => {
@@ -140,6 +162,59 @@ describe("formatRecurringPatterns", () => {
     const habitTotal = data.habits.reduce((s, h) => s + h.total, 0);
     expect(habitTotal).toBe(result.frameEvents.habits.filter((h) => h.playerSlot === slot).length);
     expect(data.deaths.total).toBe(result.frameEvents.stocks.filter((s) => s.victimSlot === slot && s.died).length);
+    expect(data.openingsAgainst.total).toBe(result.frameEvents.openings.filter((o) => o.victimSlot === slot).length);
+    expect(data.openingsAgainst.kills).toBe(
+      result.frameEvents.openings.filter((o) => o.victimSlot === slot && o.didKill).length,
+    );
+  });
+
+  it("POSITIVE: prints openings against you with volume, kill rate and the repeated door", () => {
+    const history = withOpenings(emptyPatterns("all Marth"), 100, 22, [
+      { situation: "commitment", family: "aerial", label: "dair", count: 30, kills: 8 },
+      { situation: "shield", family: "grab", label: "grab (bthrow)", count: 12, kills: 3 },
+      { situation: "landing", family: "grounded", label: "dsmash", count: 4, kills: 1 },
+    ]);
+    const game = withOpenings({ ...emptyPatterns("this game", 1), currentGames: 1 }, 5, 2, [
+      { situation: "commitment", family: "aerial", label: "dair", count: 3, kills: 2 },
+    ]);
+    const text = formatRecurringPatterns({ character: history, matchup: null }, game).join("\n");
+    expect(text).toContain("Openings against you");
+    expect(text).toContain("this game 5 in 1 game · all Marth 100 in 50 of 50 games (2.0/game)");
+    expect(text).toContain("Openings that took the stock: this game 2/5 (40%) · all Marth 22% of 100");
+    expect(text).toContain(
+      "Most frequent doors (all Marth; situation · opener): commitment · aerial · dair x30 (8 kills); shield · grab · grab (bthrow) x12 (3 kills)",
+    );
+    // A bucket below openingsBucketMin is not named as a door.
+    expect(text).not.toContain("dsmash x4");
+  });
+
+  it("NEGATIVE: low-n openings print the caution and no unguarded doors", () => {
+    const history = withOpenings(emptyPatterns("all Marth"), 12, 3, [
+      { situation: "commitment", family: "aerial", label: "dair", count: 7, kills: 2 },
+    ]);
+    const text = formatRecurringPatterns({ character: history, matchup: null }).join("\n");
+    expect(text).toContain("Low n: 12 openings in all Marth");
+    expect(text).not.toContain("Most frequent doors");
+  });
+
+  it("merges openings across a set", () => {
+    const a = withOpenings({ ...emptyPatterns("this game", 1), currentGames: 1 }, 3, 1, [
+      { situation: "commitment", family: "aerial", label: "dair", count: 3, kills: 1 },
+    ]);
+    const b = withOpenings({ ...emptyPatterns("this game", 1), currentGames: 1 }, 2, 0, [
+      { situation: "commitment", family: "aerial", label: "dair", count: 1, kills: 0 },
+      { situation: "shield", family: "grab", label: "grab (bthrow)", count: 1, kills: 0 },
+    ]);
+    const merged = mergePatternData([a, b], "this set")!;
+    expect(merged.openingsAgainst).toEqual({
+      total: 5,
+      games: 2,
+      kills: 1,
+      buckets: [
+        { situation: "commitment", family: "aerial", label: "dair", count: 4, kills: 1 },
+        { situation: "shield", family: "grab", label: "grab (bthrow)", count: 1, kills: 0 },
+      ],
+    });
   });
 });
 

@@ -4,13 +4,13 @@ Feature-development tracker. The checkbox trees are the source of truth for prog
 
 **Convention:** every task is a checkbox bullet. `[x]` = done, `[ ]` = pending. Tick a parent only when all of its children are ticked. Update this file in the same commit that completes a task.
 
-**Current state:** planning only. Both features below are fully scoped; no implementation has started.
+**Current state:** Feature 1 is implemented and tested except for two environment-bound checks (Electron-Node backfill and an interactive UI smoke test); Feature 2 is still planning only.
 
 ---
 
 ## Feature 1: Openings Against Me — clustered first-hit ledger
 
-**Status:** planned, not started.
+**Status:** implemented; two verification boxes pending (Electron-Node backfill and interactive UI smoke test).
 
 ### Why
 
@@ -84,6 +84,7 @@ Indexes: `(game_id)`, `(game_id, victim_is_player)`, `(victim_is_player, situati
 4. **Library**: add an `opening` bucket filter to `LibraryGameFilters` / `buildLibraryWhere` using `EXISTS` on `opening_events` (`victim_is_player = 1`, matching `situation` + `opener_family`); return distinct bucket options in the response; add the select to `Library.tsx` and `library/filter.ts`; include it in clear-filters state.
 5. **Coaching prompt**: extend `PatternData` (`src/pipeline/patterns.ts`) with `openingsAgainst { total, games, kills, buckets[] }`; fill from `patternsFromFrameEvents` (this game/set), `mergePatternData`, and `getPatternData` (DB history, same scope/current-version gating). Add a compact "Openings against you" section to `formatRecurringPatterns` and `formatPatternBreakdown`, with sample guards. Add one prompt instruction line so the coach names the repeated door, its n-of cost, and a replacement. Statistical clusters stay out of the prompt (unstable by dataset; descriptive view only). Bump `COACHING_PROMPT_VERSION` 4 → 5.
 6. **CLI**: `src/openings-cli.ts` with `--target`, `--character`, `--opponent`, `--stage`, `--limit`, `--k`, `--no-clusters`, `--json`; prints coverage, rule buckets, statistical clusters, and top examples. Add an `openings` npm script and document the command. Follows the `stats.ts` standalone CLI pattern.
+7. **Clip delivery**: `--render`/`--send` selects a rule bucket (default: most frequent) or shape cluster and renders its newest examples with the chronological opening-hit bounds (5 seconds before, 2 seconds after, capped at the replay's last frame). Rendering is shared with hit-review (`src/clipRender.ts`); `--send` delivers through Telegram. Captions state the measured situation/family/move, sample size, pre-hit percent, and the full conversion's damage and stock outcome. This path needs the SQLite ledger, unlike chronological hit-review.
 
 ### Tasks
 
@@ -94,108 +95,110 @@ Indexes: `(game_id)`, `(game_id, victim_is_player)`, `(victim_is_player, situati
 
 #### 1. Detector
 
-- [ ] Add `OpeningEvent` interface + `GameFrameEvents.openings`
-- [ ] Implement `extractOpeningEvents` in `src/pipeline/openingEvents.ts`
-- [ ] Implement the neutral gate (onstage; not hitstun/down/tech/ledge/offstage/dead/respawn)
-- [ ] Classify `situation` (`neutral-grounded`, `neutral-airborne`, `shield`, `shieldstun`, `commitment`, `landing`)
-- [ ] Classify `opener_family` (`aerial`, `grounded`, `special`, `projectile`, `grab`) and exact move label
-- [ ] Handle grabs (event frame = grab frame, family = grab, throw shown as detail)
-- [ ] Handle trades (two events, `traded = true`)
-- [ ] Record percent, positions, victim-facing relative x/y, distance, cornered, on-platform, damage, move count, kill, stock/verdict
-- [ ] Bump `FRAME_EVENTS_VERSION` 3 → 4 with a version comment
-- [ ] Call `extractOpeningEvents` from `extractFrameEvents`
-- [ ] Tests: grounded neutral hit, shield→grab, commitment, landing
-- [ ] Tests: negatives for hitstun continuation, ledge, offstage, dead/respawn, SD
-- [ ] Tests: trade produces two events; grab frame/label; cornered/relative-position math
-- [ ] Test: `game1.slp` fixture well-formedness invariants
+- [x] Add `OpeningEvent` interface + `GameFrameEvents.openings`
+- [x] Implement `extractOpeningEvents` in `src/pipeline/openingEvents.ts`
+- [x] Implement the neutral gate (onstage; not hitstun/down/tech/ledge/offstage/dead/respawn)
+- [x] Classify `situation` (`neutral-grounded`, `neutral-airborne`, `shield`, `shieldstun`, `commitment`, `landing`)
+- [x] Classify `opener_family` (`aerial`, `grounded`, `special`, `projectile`, `grab`) and exact move label
+- [x] Handle grabs (event frame = grab frame, family = grab, throw shown as detail)
+- [x] Handle trades (two events, `traded = true`)
+- [x] Record percent, positions, victim-facing relative x/y, distance, cornered, on-platform, damage, move count, kill, stock/verdict
+- [x] Bump `FRAME_EVENTS_VERSION` 3 → 4 with a version comment
+- [x] Call `extractOpeningEvents` from `extractFrameEvents`
+- [x] Tests: grounded neutral hit, shield→grab, commitment, landing
+- [x] Tests: negatives for hitstun continuation, ledge, offstage, dead/respawn, SD
+- [x] Tests: trade produces two events; grab frame/label; cornered/relative-position math
+- [x] Test: `game1.slp` fixture well-formedness invariants
 
 #### 2. Persistence and backfill
 
-- [ ] Add `opening_events` to `SCHEMA`
-- [ ] Add migration v18 with table + indexes
-- [ ] Add `insertOpeningEvents`
-- [ ] Add `opening_events` to `deleteFrameEventRows`
-- [ ] Persist both perspectives in `persistFrameEvents`
-- [ ] Match each opening to `stock_deaths` for stock number / death verdict
-- [ ] Confirm plain backfill re-parses games at version 4 and fills the table
-- [ ] Tests: schema/migration/index/helper assertions in `tests/db.test.ts`
-- [ ] Test: persist mapping for both `victim_is_player` perspectives
+- [x] Add `opening_events` to `SCHEMA`
+- [x] Add migration v18 with table + indexes
+- [x] Add `insertOpeningEvents`
+- [x] Add `opening_events` to `deleteFrameEventRows`
+- [x] Persist both perspectives in `persistFrameEvents`
+- [x] Match each opening to `stock_deaths` for stock number / death verdict
+- [x] Confirm plain backfill re-parses games at version 4 and fills the table
+- [x] Tests: schema/migration/index/helper assertions in `tests/db.test.ts`
+- [x] Test: persist mapping for both `victim_is_player` perspectives
 
 #### 3. Rule buckets and statistical clustering
 
-- [ ] `aggregateOpeningBuckets` with count, share, kills, kill rate, avg damage, avg follow-up hits, cornered share, distinct games, examples
-- [ ] Percent bands and cornered/on-platform qualifier splits
-- [ ] Add `openingsBucketMin` + `openingsTotalMin` to `EVENT_SAMPLE_GUARDS`
-- [ ] Deterministic k-means: numeric shape features only, seeded from sorted event ids
-- [ ] k selection 2–6 by silhouette on a deterministic sample, min cluster size guard
-- [ ] `n ≥ 40` guard with explicit `insufficient-sample` reason
-- [ ] `weakSeparation` flag and descriptive (non-technique) cluster labels
-- [ ] Tests: bucket counts/rates/guards
-- [ ] Tests: determinism under shuffling; k/min-size/insufficient-sample guards
-- [ ] Tests: cluster descriptors pick the correct dominant situation/move
+- [x] `aggregateOpeningBuckets` with count, share, kills, kill rate, avg damage, avg follow-up hits, cornered share, distinct games, examples
+- [x] Percent bands and cornered/on-platform qualifier splits
+- [x] Add `openingsBucketMin` + `openingsTotalMin` to `EVENT_SAMPLE_GUARDS`
+- [x] Deterministic k-means: numeric shape features only, seeded from sorted event ids
+- [x] k selection 2–6 by silhouette on a deterministic sample, min cluster size guard
+- [x] `n ≥ 40` guard with explicit `insufficient-sample` reason
+- [x] `weakSeparation` flag and descriptive (non-technique) cluster labels
+- [x] Tests: bucket counts/rates/guards
+- [x] Tests: determinism under shuffling; k/min-size/insufficient-sample guards
+- [x] Tests: cluster descriptors pick the correct dominant situation/move
 
 #### 4. Query, contract, and IPC
 
-- [ ] Add shared contract `src/openingsAgainst.ts` (filters, coverage, baseline, buckets, clusters, examples)
-- [ ] Add `getOpeningsAgainst(filters)` in `src/db.ts` with scope + version gating
-- [ ] Register `stats:openingsAgainst` with `safeHandle`
-- [ ] Expose in preload
-- [ ] Type in `src/renderer/global.d.ts`
-- [ ] Add `useOpeningsAgainst` React Query hook
-- [ ] Tests: seeded temp-DB perspective isolation, filters, coverage, version gating
+- [x] Add shared contract `src/openingsAgainst.ts` (filters, coverage, baseline, buckets, clusters, examples)
+- [x] Add `getOpeningsAgainst(filters)` in `src/db.ts` with scope + version gating
+- [x] Register `stats:openingsAgainst` with `safeHandle`
+- [x] Expose in preload
+- [x] Type in `src/renderer/global.d.ts`
+- [x] Add `useOpeningsAgainst` React Query hook
+- [x] Tests: seeded temp-DB perspective isolation, filters, coverage, version gating
 
 #### 5. UI
 
-- [ ] Performance Lab `OpeningsAgainst.tsx` rule-bucket sections (HabitLedger-style)
-- [ ] Cluster cards with descriptors, sample counts, weak-separation note
-- [ ] Filters: recency, your character, opponent character, stage
-- [ ] Coverage warning + backfill hint when games predate the backfill
-- [ ] Example chips navigate to `/game/:id` with `seekFrame`
-- [ ] Insert section into `PerformanceLab.tsx`
-- [ ] Library: `opening` filter in `LibraryGameFilters` / `buildLibraryWhere` via `EXISTS`
-- [ ] Library: distinct bucket options in response, select in `Library.tsx`, `filter.ts`, clear-filters
-- [ ] Tests: Library `EXISTS` filter behavior
+- [x] Performance Lab `OpeningsAgainst.tsx` rule-bucket sections (HabitLedger-style)
+- [x] Cluster cards with descriptors, sample counts, weak-separation note
+- [x] Filters: recency, your character, opponent character, stage
+- [x] Coverage warning + backfill hint when games predate the backfill
+- [x] Example chips navigate to `/game/:id` with `seekFrame`
+- [x] Insert section into `PerformanceLab.tsx`
+- [x] Library: `opening` filter in `LibraryGameFilters` / `buildLibraryWhere` via `EXISTS`
+- [x] Library: distinct bucket options in response, select in `Library.tsx`, `filter.ts`, clear-filters
+- [x] Tests: Library `EXISTS` filter behavior
 
 #### 6. Coaching prompt
 
-- [ ] Add `PatternData.openingsAgainst`
-- [ ] Fill it in `patternsFromFrameEvents` and `mergePatternData`
-- [ ] Aggregate it in `getPatternData` with current-version gating
-- [ ] Format "Openings against you" in `formatRecurringPatterns`
-- [ ] Format one-line scope in `formatPatternBreakdown`
-- [ ] Add a prompt instruction line (name the door, n-of cost, replacement)
-- [ ] Bump `COACHING_PROMPT_VERSION` 4 → 5
-- [ ] Keep statistical clusters out of the prompt
-- [ ] Tests: formatter output, sample-guard suppression, updated `PatternData` fixtures
+- [x] Add `PatternData.openingsAgainst`
+- [x] Fill it in `patternsFromFrameEvents` and `mergePatternData`
+- [x] Aggregate it in `getPatternData` with current-version gating
+- [x] Format "Openings against you" in `formatRecurringPatterns`
+- [x] Format one-line scope in `formatPatternBreakdown`
+- [x] Add a prompt instruction line (name the door, n-of cost, replacement)
+- [x] Bump `COACHING_PROMPT_VERSION` 4 → 5
+- [x] Keep statistical clusters out of the prompt
+- [x] Tests: formatter output, sample-guard suppression, updated `PatternData` fixtures
 
 #### 7. CLI
 
-- [ ] Add `src/openings-cli.ts` (`--target`, `--character`, `--opponent`, `--stage`, `--limit`, `--k`, `--no-clusters`, `--json`)
-- [ ] Print coverage, rule buckets, clusters, top examples
-- [ ] Add `openings` npm script
-- [ ] Document the command
+- [x] Add `src/openings-cli.ts` (`--target`, `--character`, `--opponent`, `--stage`, `--limit`, `--k`, `--no-clusters`, `--json`)
+- [x] Print coverage, rule buckets, clusters, top examples
+- [x] Add `--render`/`--send` clip delivery for a selected bucket or cluster (`--bucket`, `--cluster`, `--clips`)
+- [x] Shared renderer extracted to `src/clipRender.ts`; clip selection/caption logic in `src/openingClips.ts`
+- [x] Add `openings` npm script
+- [x] Document the command and clip delivery
 
 #### 8. Docs and release
 
-- [ ] `docs/melee-accuracy.md`: opening definition, situation/family states, grab/trade handling, cluster caveats
-- [ ] `docs/DEVELOPMENT.md`: new event table, version bump, backfill note
-- [ ] `CLAUDE.md`: module and command bullets
-- [ ] `README.md`: feature bullet
-- [ ] `CHANGELOG.md`: entry
-- [ ] Version **1.15.0** in `package.json` + both `package-lock.json` entries + version docs
-- [ ] `npm run verify:release`
+- [x] `docs/melee-accuracy.md`: opening definition, situation/family states, grab/trade handling, cluster caveats
+- [x] `docs/DEVELOPMENT.md`: new event table, version bump, backfill note
+- [x] `CLAUDE.md`: module and command bullets
+- [x] `README.md`: feature bullet
+- [x] `CHANGELOG.md`: entry
+- [x] Version **1.15.0** in `package.json` + both `package-lock.json` entries + version docs
+- [x] `npm run verify:release`
 
 #### 9. Verification
 
-- [ ] `npm run typecheck`
-- [ ] `npm test`
-- [ ] `npm run lint`
-- [ ] `npm run format:check`
-- [ ] `npm run verify:docs`
-- [ ] `npm run verify:release`
-- [ ] Fixture parse/CLI JSON spot-check: neutral gate counts, grab and trade cases
-- [ ] `npm run backfill -- --limit 5` through Electron's Node, confirm rows + coverage
-- [ ] Performance Lab and Library smoke test: filters and example navigation
+- [x] `npm run typecheck`
+- [x] `npm test`
+- [x] `npm run lint`
+- [x] `npm run format:check`
+- [x] `npm run verify:docs`
+- [x] `npm run verify:release`
+- [x] Fixture parse/CLI JSON spot-check: neutral gate counts, grab and trade cases
+- [ ] `npm run backfill -- --limit 5` through Electron's Node, confirm rows + coverage — blocked here: better-sqlite3 is built for Node 26 (ABI 147), Electron 41 needs ABI 145; backfill engine verified under Node instead (stale game → v4, rows restored)
+- [ ] Performance Lab and Library smoke test: filters and example navigation — not run (no app database/display in this environment); renderer bundle builds
 
 ---
 

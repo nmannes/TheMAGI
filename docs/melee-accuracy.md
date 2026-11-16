@@ -34,6 +34,27 @@ The library's move table is `50 getup attack, 51 getup attack (slow), 52 pummel,
 
 A recovery situation starts below the stage or far past the ledge in a vulnerable air state and ends on the next onstage frame or at death. An edgeguard kill is credited only when the recovering player took damage inside the situation or the edgeguarder occupied the ledge during it; an unforced offstage death is reported separately. Death and respawn frames never open a situation (the old counter opened one on every death frame and closed it as a success on respawn).
 
+### Opening ledger (`src/pipeline/openingEvents.ts`)
+
+The unit is the **first hit in neutral of an opponent conversion where the player is the victim**, not a follow-up combo hit. The event frame is `conversion.startFrame` — the first stun/grab frame. For a grab that is the grab frame, not the later throw; the label reads `grab (bthrow)` and `opener_move_id` remains the conversion's first damaging move (throw or pummel), so nothing claims the grab itself dealt damage.
+
+Both players' `post` states on `startFrame - 1` (plus `startFrame` for the grab check) decide inclusion:
+
+- **Included and labeled:** the victim is onstage in neutral, or in their own attack/special/air-dodge commitment, landing lag, shield, or shieldstun. These are the decisions that get punished.
+- **Excluded:** hitstun/tumble continuations, down/tech states, being grabbed or thrown, command grabs, ledge occupancy, offstage positions, and dead/dying/respawn frames. The recovery, ledge, and habit ledgers own those situations; SDs with no conversion belong to `stock_deaths.verdict = 'SD'`.
+
+Victim situations: `neutral-grounded | neutral-airborne | shield | shieldstun | commitment | landing`.
+Opener families: `aerial | grounded | special | projectile | grab`.
+
+- Percent and positions come from the pre-hit frame. Relative x/y are expressed in the victim's facing frame; `cornered` reuses the habit definition (`|x| > 0.7 * STAGE_LEDGE_X` with the attacker between victim and center).
+- A trade produces one event per conversion, each flagged `traded`.
+- A projectile opening is labeled only when the first damaging move is unattributed (move id 1 or absent) and an attacker-owned item is near the hit; otherwise the hit is attributed to its move id.
+- Each opening is matched to a `stock_deaths` row by game, victim, and death-frame window for `stock_number` / `death_verdict`; `did_kill` comes from the conversion. No match means it did not kill.
+
+Rule buckets group by situation × opener family × exact move and are the authoritative grouping. **Shape clusters are exploratory and descriptive:** they use only numeric pre-hit features (percent, victim-facing relative x/y, distance, stage-normalized x, on-platform), are deterministic for a fixed event set (seeded k-means++, k 2–6 selected by silhouette, `n ≥ 40`, minimum cluster size `max(8, ceil(0.05n))`), and are recomputed per query — never persisted, never used as Library filters, and never shown to the coaching model. Cluster labels describe measurements ("close range · 20–50% · center"), never techniques. Low-sample buckets are marked in the UI, not hidden.
+
+A clip for a bucket or cluster is anchored on the opening event frame with 5 seconds of lead-in and 2 seconds after the hit, matching the chronological hit-review "opening hit taken" event. The caption reports the bucket/cluster sample size and the full conversion's damage and stock outcome; the video itself shows only the opening hit and the immediate response, so a caption never implies the follow-up hits were shown.
+
 ### Highlights
 
 - "Tipper F-Smash" is now "Early F-Smash Kill … (tipper not verified)": replay data does not distinguish tipper from sourspot, and the percent shown is the victim's percent before the final hit.

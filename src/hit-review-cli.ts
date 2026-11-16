@@ -13,14 +13,13 @@
  * still available behind --legacy-ranked.
  */
 
-import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import { SlippiGame } from "@slippi/slippi-js/node";
 
+import { clipFileName, findRenderClipScript, renderClipFile } from "./clipRender.js";
 import { resolveReplayFolder, resolveTarget } from "./config.js";
 import { expandHome, parseArgs, USAGE, type CliArgs } from "./hitReviewCliArgs.js";
 import {
@@ -157,7 +156,7 @@ async function main(): Promise<void> {
     telegramConfig = telegramConfigFromEnv({ chatId: args.telegramChat });
   }
 
-  const renderScript = findRenderScript();
+  const renderScript = findRenderClipScript();
   if ((args.render || args.telegram) && !args.dryRun && !fs.existsSync(renderScript)) {
     throw new Error(`Render script not found: ${renderScript}`);
   }
@@ -247,7 +246,7 @@ async function main(): Promise<void> {
       let groupOk = true;
 
       for (const sequence of group.sequences) {
-        const clipPath = path.join(outDir, clipFileName(sequence));
+        const clipPath = path.join(outDir, reviewClipFileName(sequence));
 
         if (args.dryRun) {
           log(
@@ -259,7 +258,7 @@ async function main(): Promise<void> {
 
         try {
           fs.mkdirSync(outDir, { recursive: true });
-          renderClip(sequence, clipPath, args, renderScript);
+          renderClip(sequence, clipPath, args);
           writeClipMetadata(clipPath, sequence);
           rendered++;
           clips.push({ path: clipPath, sequence });
@@ -508,7 +507,7 @@ async function runChronological(args: CliArgs, target: string): Promise<void> {
     telegramConfig = telegramConfigFromEnv({ chatId: args.telegramChat });
   }
 
-  const renderScript = findRenderScript();
+  const renderScript = findRenderClipScript();
   if ((args.render || args.telegram) && !args.dryRun && !fs.existsSync(renderScript)) {
     throw new Error(`Render script not found: ${renderScript}`);
   }
@@ -563,7 +562,7 @@ async function runChronological(args: CliArgs, target: string): Promise<void> {
   if (args.telegram) log(`Telegram destination: chat ${telegramConfig?.chatId ?? "(dry run)"}`);
 
   for (const sequence of selected) {
-    const clipPath = path.join(outDir, clipFileName(sequence));
+    const clipPath = path.join(outDir, reviewClipFileName(sequence));
 
     if (args.dryRun) {
       log(
@@ -576,7 +575,7 @@ async function runChronological(args: CliArgs, target: string): Promise<void> {
 
     try {
       fs.mkdirSync(outDir, { recursive: true });
-      renderClip(sequence, clipPath, args, renderScript);
+      renderClip(sequence, clipPath, args);
       writeClipMetadata(clipPath, sequence);
       rendered++;
       clips.push({ path: clipPath, sequence });
@@ -901,34 +900,17 @@ function markProcessed(state: HitReviewState, candidate: Candidate, sequences: n
   };
 }
 
-function renderClip(sequence: HitReviewSequence, outPath: string, args: CliArgs, renderScript: string): void {
-  const commandArgs = [
-    renderScript,
-    "--replay",
-    sequence.replayPath,
-    "--start",
-    String(sequence.clipStartFrame),
-    "--end",
-    String(sequence.clipEndFrame),
-    "--out",
+function renderClip(sequence: HitReviewSequence, outPath: string, args: CliArgs): void {
+  renderClipFile({
+    replayPath: sequence.replayPath,
+    startFrame: sequence.clipStartFrame,
+    endFrame: sequence.clipEndFrame,
     outPath,
-    "--resolution",
-    args.resolution,
-  ];
-  if (args.backend) commandArgs.push("--backend", args.backend);
-  if (args.noXvfb) commandArgs.push("--no-xvfb");
-
-  const result = spawnSync("bash", commandArgs, {
-    encoding: "utf8",
-    env: process.env,
-    maxBuffer: 20 * 1024 * 1024,
+    resolution: args.resolution,
+    backend: args.backend,
+    noXvfb: args.noXvfb,
+    verbose: args.verbose,
   });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
-    throw new Error(`render-clip.sh exited ${result.status ?? "by signal"}\n${tail(output, 4000)}`);
-  }
-  if (args.verbose && result.stdout.trim()) log(result.stdout.trim());
 }
 
 function writeClipMetadata(clipPath: string, sequence: HitReviewSequence): void {
@@ -939,30 +921,21 @@ function writeClipMetadata(clipPath: string, sequence: HitReviewSequence): void 
   );
 }
 
-function findRenderScript(): string {
-  const candidates = [
-    path.resolve(__dirname, "..", "scripts", "render-clip.sh"),
-    path.resolve(__dirname, "..", "..", "scripts", "render-clip.sh"),
-    path.resolve(process.cwd(), "scripts", "render-clip.sh"),
-  ];
-  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0]!;
-}
-
-function clipFileName(sequence: HitReviewSequence): string {
-  const stem = path
-    .basename(sequence.replayPath, path.extname(sequence.replayPath))
-    .replace(/[^a-zA-Z0-9._-]+/g, "_")
-    .slice(0, 60);
-  const hash = createHash("sha1").update(sequence.replayPath).digest("hex").slice(0, 8);
-  const label =
-    sequence.kind === "opening-hit-taken"
-      ? "opening"
-      : sequence.kind === "conversion-landed"
-        ? "conversion"
-        : sequence.didKill
-          ? "death"
-          : "hit";
-  return `${stem}-${hash}-${label}-${sequence.firstHitFrame}-${sequence.clipStartFrame}-${sequence.clipEndFrame}.mp4`;
+function reviewClipFileName(sequence: HitReviewSequence): string {
+  return clipFileName({
+    replayPath: sequence.replayPath,
+    label:
+      sequence.kind === "opening-hit-taken"
+        ? "opening"
+        : sequence.kind === "conversion-landed"
+          ? "conversion"
+          : sequence.didKill
+            ? "death"
+            : "hit",
+    firstHitFrame: sequence.firstHitFrame,
+    clipStartFrame: sequence.clipStartFrame,
+    clipEndFrame: sequence.clipEndFrame,
+  });
 }
 
 function deliveredKey(sequence: HitReviewSequence): string {
@@ -1021,10 +994,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
-}
-
-function tail(value: string, max: number): string {
-  return value.length <= max ? value : value.slice(value.length - max);
 }
 
 function errorMessage(err: unknown): string {

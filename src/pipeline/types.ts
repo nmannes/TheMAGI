@@ -482,6 +482,9 @@ export type {
   RecoverySpan,
   ShieldBlockRecord,
   WhiffEvent,
+  OpeningEvent,
+  OpeningSituation,
+  OpeningFamily,
 } from "./frameEvents.js";
 
 /** Historical player context for LLM coaching prompts */

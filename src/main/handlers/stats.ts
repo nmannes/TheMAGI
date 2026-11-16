@@ -15,6 +15,7 @@ import {
   getCharacterSignatureAggregates,
   getCharacterGameStats,
   getCharacterEventProfile,
+  getOpeningsAgainst,
   getOpponentDetail,
   getDashboardHighlights,
   getAnalysisHistory,
@@ -51,6 +52,9 @@ export function registerStatsHandlers(safeHandle: SafeHandleFn): void {
   safeHandle("stats:characterSignature", (_e, character: string) => getCharacterSignatureAggregates(character));
   safeHandle("stats:characterGameStats", (_e, character: string) => getCharacterGameStats(character));
   safeHandle("stats:characterEventProfile", (_e, character: string) => getCharacterEventProfile(character));
+  safeHandle("stats:openingsAgainst", (_e, filters: Parameters<typeof getOpeningsAgainst>[0]) =>
+    getOpeningsAgainst(filters),
+  );
   safeHandle("stats:opponentDetail", (_e, opponentKey: string) => getOpponentDetail(opponentKey));
   safeHandle("stats:dashboardHighlights", () => getDashboardHighlights());
   safeHandle("stats:analysisHistory", (_e, limit: number, offset: number, scopeFilter?: string) =>

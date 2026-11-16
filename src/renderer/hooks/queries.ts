@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import type { OpeningsAgainstFilters } from "../../openingsAgainst";
 
 const GC_10MIN = 1000 * 60 * 10;
 
@@ -23,6 +24,7 @@ export const useLibraryGames = (filters: {
   char: string;
   stage: string;
   result: string;
+  opening?: string;
   limit: number;
   offset: number;
 }) => {
@@ -133,6 +135,14 @@ export const useCharacterEventProfile = (character: string | null) => {
     queryKey: ["characterEventProfile", character],
     queryFn: () => (character ? window.clippi.getCharacterEventProfile(character) : null),
     enabled: !!character,
+    gcTime: GC_10MIN,
+  });
+};
+
+export const useOpeningsAgainst = (filters: OpeningsAgainstFilters) => {
+  return useQuery({
+    queryKey: ["openingsAgainst", filters],
+    queryFn: () => window.clippi.getOpeningsAgainst(filters),
     gcTime: GC_10MIN,
   });
 };

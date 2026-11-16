@@ -33,6 +33,7 @@ function emptyPatterns(label: string, games = 50): PatternData {
     games,
     currentGames: games,
     habits: [],
+    openingsAgainst: { total: 0, games: 0, kills: 0, buckets: [] },
     deaths: { total: 0, verdicts: {}, resourceFaults: 0, byKiller: [] },
     throwDI: [],
     whiffCapture: { opportunities: 0, punished: 0, unpunishedByMove: [] },
@@ -235,6 +236,25 @@ describe("formatPatternBreakdown", () => {
 
   it("NEGATIVE: a scope with nothing measured is omitted rather than printed empty", () => {
     expect(formatPatternBreakdown([emptyPatterns("vs Sheik", 12)])).toEqual([]);
+  });
+
+  it("adds openings against you under the openingsTotalMin guard", () => {
+    const measured: PatternData = {
+      ...emptyPatterns("vs Fox", 40),
+      openingsAgainst: {
+        total: 60,
+        games: 38,
+        kills: 12,
+        buckets: [{ situation: "commitment", family: "grounded", label: "dash attack", count: 20, kills: 5 }],
+      },
+    };
+    expect(formatPatternBreakdown([measured])).toEqual(["  vs Fox (40 games): openings against you → kill 20% of 60"]);
+
+    const low: PatternData = {
+      ...emptyPatterns("vs Sheik", 10),
+      openingsAgainst: { total: 9, games: 4, kills: 2, buckets: [] },
+    };
+    expect(formatPatternBreakdown([low])).toEqual(["  vs Sheik (10 games): openings against you → kill 2/9 (low n)"]);
   });
 });
 

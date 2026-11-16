@@ -22,6 +22,10 @@ import type {
   CharacterBlurbResult as BlurbResult,
 } from "../characterEventProfile";
 import type { CareerAnalysisResult as CareerResult } from "../careerAnalysis";
+import type {
+  OpeningsAgainstFilters as OpeningsFilters,
+  OpeningsAgainstResult as OpeningsResult,
+} from "../openingsAgainst";
 import type { CornermanLiveEvent as LiveEvent } from "../cornermanLiveEvents";
 import type { ProviderId as LlmProviderId } from "../llm";
 import type { ProviderSpeechEvent, ProviderSpeechRequest } from "../providerVoice";
@@ -41,6 +45,8 @@ declare global {
   type CharacterEventProfile = EventProfile;
   type CharacterBlurbResult = BlurbResult;
   type CareerAnalysisResult = CareerResult;
+  type OpeningsAgainstFilters = OpeningsFilters;
+  type OpeningsAgainstResult = OpeningsResult;
 
   interface CornermanStatus {
     active: boolean;
@@ -161,6 +167,7 @@ declare global {
         charactersPlayed: number;
         characters: string[];
         stages: string[];
+        openingFilters: Array<{ value: string; situation: string; family: string; count: number }>;
       }>;
       getLatestAnalysis: () => Promise<any[]>;
       getOpponents: (search?: string) => Promise<any[]>;
@@ -173,6 +180,7 @@ declare global {
       getCharacterSignatureStats: (character: string) => Promise<any>;
       getCharacterGameStats: (character: string) => Promise<any[]>;
       getCharacterEventProfile: (character: string) => Promise<CharacterEventProfile>;
+      getOpeningsAgainst: (filters: OpeningsAgainstFilters) => Promise<OpeningsAgainstResult>;
       getOpponentDetail: (opponentKey: string) => Promise<any>;
       getDashboardHighlights: () => Promise<any>;
       getGameHighlights: (gameId: number) => Promise<any[]>;

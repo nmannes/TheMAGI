@@ -20,6 +20,7 @@ import { computeDeathVerdicts, extractThrowDIRecords } from "./measuredDI.js";
 import { extractRecoverySpans } from "./recoveryEvents.js";
 import { extractShieldBlocks } from "./shieldEvents.js";
 import { extractWhiffEvents } from "./whiffEvents.js";
+import { extractOpeningEvents } from "./openingEvents.js";
 
 // ── Action state constants not named in slippi-js's State table ────────
 // Verified against the community action-state map. The slippi-js enum
@@ -105,8 +106,11 @@ export interface ConversionRecord {
  *       spans, whiff exclusions and resource faults on those stages; KneeBend
  *       no longer counts as airborne. Signature stats and highlights are
  *       rebuilt by the same backfill (move-id table and kill evidence fixes).
+ *   4 — opening ledger (opening_events): the first hit in neutral of every
+ *       conversion with the pre-hit victim/attacker state, position, percent,
+ *       situation and opener family. A plain backfill populates the table.
  */
-export const FRAME_EVENTS_VERSION = 3;
+export const FRAME_EVENTS_VERSION = 4;
 
 /**
  * Measured-DI grade for a death (from the actual stick input).
@@ -297,6 +301,72 @@ export interface RecoverySpan {
   hitDuringRecovery: boolean;
 }
 
+/** What the victim was doing on the frame before the first hit. */
+export type OpeningSituation =
+  | "neutral-grounded"
+  | "neutral-airborne"
+  | "shield"
+  | "shieldstun"
+  | "commitment"
+  | "landing";
+
+/** How the opponent's first hit was delivered. */
+export type OpeningFamily = "aerial" | "grounded" | "special" | "projectile" | "grab";
+
+/**
+ * One first hit in neutral of a conversion where the target is the victim
+ * (see openingEvents.ts). Combo continuations, ledge/offstage hits and
+ * knockdown/tech-chase follow-ups are excluded; the pre-hit state, position
+ * and percent are captured as evidence. Grabs start at the grab frame, while
+ * openerMoveId/openerLabel describe the first damaging move (the throw).
+ */
+export interface OpeningEvent {
+  /** Set only when the record was loaded from the database. */
+  id?: number;
+  /** Set only when the record was loaded from the database. */
+  gameId?: number;
+  /** Stages the event's game was played on; set by the DB query for clustering. */
+  stageId?: number;
+  victimSlot: PlayerSlot;
+  attackerSlot: PlayerSlot;
+  startFrame: number;
+  endFrame: number | null;
+  /** First damaging move of the conversion; null when the parser attributed none. */
+  openerMoveId: number | null;
+  openerLabel: string;
+  openerFamily: OpeningFamily;
+  /** The conversion began with a grab (see openerLabel for the first damaging move). */
+  grab: boolean;
+  /** slippi-js's raw opening classification; see the warning in cornermanLiveStats.ts. */
+  openingType: string;
+  traded: boolean;
+  situation: OpeningSituation;
+  /** Action state ids on the pre-hit frame (startFrame - 1). */
+  victimState: number;
+  attackerState: number;
+  victimPercent: number;
+  attackerPercent: number;
+  victimX: number;
+  victimY: number;
+  attackerX: number;
+  attackerY: number;
+  /** (attackerX - victimX) * victim facing on the pre-hit frame. */
+  relativeX: number;
+  relativeY: number;
+  distance: number;
+  /** Habit-style corner rule: past 0.7 × ledge X with the attacker between victim and center. */
+  cornered: boolean;
+  /** Victim's height is above the stage's platform threshold. */
+  onPlatform: boolean;
+  damage: number;
+  moveCount: number;
+  didKill: boolean;
+  /** Linked stock when this conversion took it; null otherwise. */
+  stockNumber: number | null;
+  deathFrame: number | null;
+  deathVerdict: DeathVerdict | null;
+}
+
 export interface GameFrameEvents {
   conversions: ConversionRecord[];
   stocks: StockRecord[];
@@ -309,6 +379,8 @@ export interface GameFrameEvents {
   shieldBlocks: ShieldBlockRecord[];
   /** Whiffed attacks with the punish-opportunity denominator. */
   whiffs: WhiffEvent[];
+  /** First hits in neutral of each conversion, both perspectives (opening ledger). */
+  openings: OpeningEvent[];
   /** Attack commitments per slot. Computed, not persisted (Phase 2 consumers). */
   attacks: [AttackInstance[], AttackInstance[]];
   neutralSegments: NeutralSegment[];
@@ -1024,6 +1096,8 @@ export function extractFrameEvents(
 
   const whiffs = extractWhiffEvents(frames, lastFrame, stageId, [p0Index, p1Index], attacks, conversionRecords);
 
+  const openings = extractOpeningEvents(conversionRecords, stockRecords, frames, lastFrame, stageId, p0Index, p1Index);
+
   return {
     conversions: conversionRecords,
     stocks: stockRecords,
@@ -1032,6 +1106,7 @@ export function extractFrameEvents(
     recoverySpans,
     shieldBlocks,
     whiffs,
+    openings,
     attacks,
     neutralSegments,
   };

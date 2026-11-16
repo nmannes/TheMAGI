@@ -5,6 +5,7 @@ import { Card } from "../components/ui/Card";
 import { Badge } from "../components/ui/Badge";
 import { EmptyState } from "../components/ui/EmptyState";
 import { usePerformanceHub, useTrainingLog } from "../hooks/queries";
+import { OpeningsAgainst } from "./performance/OpeningsAgainst";
 
 type PerformanceMetric = Awaited<ReturnType<typeof window.clippi.getPerformanceHub>>["metrics"][number];
 
@@ -299,6 +300,8 @@ export function PerformanceLab({ refreshKey: _ }: { refreshKey: number }) {
           </Card>
         </section>
       </div>
+
+      <OpeningsAgainst />
 
       <section aria-labelledby="review-queue-heading">
         <div className="performance-section-heading">

@@ -1,5 +1,16 @@
 # Release notes
 
+## 1.15.0 — 2026-11-16
+
+- Add **Openings against you** to Performance Lab. It records the first hit in neutral of every opponent conversion where you were the victim — a grab counts at the grab frame, not the throw — and groups them by the situation you were in, the opener family, and the exact move. Combo follow-ups, ledge/offstage hits, and self-destructs are excluded.
+- Rule buckets show each opening's share, kill rate, average damage and follow-up hits, cornered/on-platform splits, percent bands, and replay examples; low-sample buckets are dimmed rather than hidden. Filter by your character, the opponent's character, stage, or recency, with a coverage warning when older games still need a backfill.
+- Descriptive shape clusters group openings by pre-hit percent, position, distance, and platform. They are deterministic for a fixed set, recomputed per query, never saved, never used as filters, and never sent to the coaching model; labels describe measurements, not techniques.
+- Add an "Opening faced" filter to the Library so you can find the games where a particular situation/move combination hit you.
+- Coaching now receives openings against you per scope (this game or set, matchup history, character history) with sample guards, and is instructed to name the repeated opening with its count and cost and propose a replacement. Coaching prompt version 5; cached analyses regenerate when next opened.
+- Add `npm run openings`, a source CLI that prints coverage, rule buckets, shape clusters, and recent examples (or `--json`). `--target` verifies the configured target player; stored rows are resolved against that target at import time.
+- `npm run openings -- --send` renders and sends a clip for the most frequent rule bucket, or a chosen `--bucket`/`--cluster`, using the same headless playback path and 5-second/2-second opening-hit bounds as chronological hit review. `--render` keeps clips local; `--clips`, `--resolution`, `--out`, and `--backend` control the output.
+- The opening ledger is a new event table (schema v18) and `FRAME_EVENTS_VERSION` is now 4. Run `npm run backfill` after upgrading so existing games contribute openings to the views and to coaching history.
+
 ## 1.14.0 — 2026-11-15
 
 - Make chronological review the default for the hit-review CLI. The earlier cost-ranked selection requires `--legacy-ranked`, and its `--state`, `--since-hours`, `--all`, and `--no-state` options are rejected without it; `--chronological` remains accepted for compatibility with older scripts.

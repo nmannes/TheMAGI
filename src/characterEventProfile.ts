@@ -139,6 +139,8 @@ export const EVENT_SAMPLE_GUARDS = {
   shieldMoveMin: 8,
   recoveryRouteMin: 20,
   edgeguardCellMin: 8,
+  openingsBucketMin: 8,
+  openingsTotalMin: 25,
   blurbGamesMin: 10,
 } as const;
 
@@ -149,6 +151,17 @@ export const EVENT_SAMPLE_GUARDS = {
 // Renderer code should treat unknown strings as valid (append after known keys).
 export const DI_VERDICT_ORDER = ["NO_DI", "WRONG_DI", "OK_DI", "GOOD_DI", "FAILED_RECOVERY", "SD", "UNKNOWN"] as const;
 export const HABIT_SITUATION_ORDER = ["knockdown", "ledge", "oos"] as const;
+// Opening ledger vocabulary (src/pipeline/openingEvents.ts). Shared so the
+// Performance Lab renders the same order the pipeline and prompt use.
+export const OPENING_SITUATION_ORDER = [
+  "neutral-grounded",
+  "neutral-airborne",
+  "shield",
+  "shieldstun",
+  "commitment",
+  "landing",
+] as const;
+export const OPENING_FAMILY_ORDER = ["aerial", "grounded", "special", "projectile", "grab"] as const;
 export const RECOVERY_ROUTE_ORDER = ["high", "mid", "low"] as const;
 export const EDGEGUARD_DEPTH_ORDER = ["onstage", "ledge", "shallow", "deep"] as const;
 export const SHIELD_GRADE_ORDER = [

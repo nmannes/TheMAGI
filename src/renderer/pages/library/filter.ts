@@ -24,6 +24,9 @@ export interface LibraryFilters {
   char: "all" | string;
   stage: "all" | string;
   result: "all" | "win" | "loss";
+  /** "situation::family" bucket. Applied in SQL (opening_events EXISTS), so
+   *  this client-side helper ignores it — it has no per-game opening rows. */
+  opening: "all" | string;
 }
 
 export function filterGames<G extends LibraryGame>(games: G[], f: LibraryFilters): G[] {

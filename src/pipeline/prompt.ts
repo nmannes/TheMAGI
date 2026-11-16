@@ -276,6 +276,7 @@ function formatShieldSection(frameEvents: GameFrameEvents, tagBySlot: [string, s
 const COACHING_EVIDENCE_RULES = `EVIDENCE RULES
 - Every rate carries its denominator: "rolled from ledge 31 of 120 times vs Fox", not "rolls a lot".
 - Correlation is not cause. Recovery-route and edgeguard-commitment outcome numbers are descriptive; say what happened, not why.
+- "Openings against you" counts the first hit in neutral of an opponent conversion where you were the victim (a grab at its grab frame, not the throw; follow-up combo hits, ledge/offstage hits and SDs excluded). Name the repeated door with its n-of and what it cost, then replace it. Describe the measured bucket only — do not upgrade it to a technique name, and do not invent clusters; none are shown.
 - Use each block's stated definition and do not upgrade it. A shield punish window is "actionable at least 8 frames before the attacker, who was grounded within estimated grab distance" — call it a window, not a guaranteed punish you always must take. A "didn't make it back" death had no final hit to grade DI on — it is neither a DI mistake nor a self-destruct. A "no opponent hit" death may be a ledge-occupancy edgeguard. "DI with no survival benefit" means the stick was close to parallel to the launch (or, for side kills, on the downward side) — not "DI'd into the blast zone". A low-yield opening only says little damage followed; it does not prove a bigger punish existed. If you propose a better punish route, label it your matchup judgment.
 - Frame data, matchup facts and character tech that are not in the data must be well-established; otherwise say it is your read. No generic matchup advice that is not tied to an observed pattern.
 - Distinguish decision problems (predictable options, wrong option for the situation) from execution problems (dropped inputs). They need different practice.
@@ -792,7 +793,7 @@ export function assemblePlayerContext(history: PlayerHistory): string {
  * changes enough that cached analyses should not be served. Stored in
  * coaching_analyses.prompt_version; cache lookups match on it.
  */
-export const COACHING_PROMPT_VERSION = "4";
+export const COACHING_PROMPT_VERSION = "5";
 
 /**
  * PlayerSummary fields left out of the prompt: superseded by the measured

@@ -248,6 +248,19 @@ describe("win-rate correctness", () => {
     expect(DB_SOURCE).toContain("idx_whiff_events_lookup");
   });
 
+  it("has migration v18 for the opening ledger", () => {
+    expect(DB_SOURCE).toContain("version: 18");
+    expect(DB_SOURCE).toContain("Per-instance opening ledger");
+    expect(DB_SOURCE).toContain("CREATE TABLE IF NOT EXISTS opening_events");
+    expect(DB_SOURCE).toContain("export function insertOpeningEvents");
+    expect(DB_SOURCE).toContain("idx_opening_events_game_victim");
+    expect(DB_SOURCE).toContain("idx_opening_events_lookup");
+    expect(DB_SOURCE).toContain('"opening_events"');
+
+    const IMPORTER_SOURCE = fs.readFileSync(path.resolve(__dirname, "../src/importer.ts"), "utf-8");
+    expect(IMPORTER_SOURCE).toContain("insertOpeningEvents(");
+  });
+
   it("has migration v17 relabeling or dropping highlights the old detectors overclaimed", () => {
     expect(DB_SOURCE).toContain("version: 17");
     expect(DB_SOURCE).toContain("REPAIR_HIGHLIGHT_LABELS_SQL");

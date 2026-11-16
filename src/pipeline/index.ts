@@ -18,6 +18,24 @@ export { computeDeathVerdicts, extractThrowDIRecords, DI_DEADZONE } from "./meas
 export { extractRecoverySpans } from "./recoveryEvents.js";
 export { extractShieldBlocks } from "./shieldEvents.js";
 export { extractWhiffEvents } from "./whiffEvents.js";
+export { extractOpeningEvents } from "./openingEvents.js";
+export {
+  aggregateOpeningBuckets,
+  clusterOpenings,
+  sortOpeningBuckets,
+  summarizeOpenings,
+  OPENING_SITUATION_ORDER,
+  OPENING_FAMILY_ORDER,
+} from "./openingClusters.js";
+export type {
+  OpeningBucket,
+  OpeningBaseline,
+  OpeningClusterResult,
+  OpeningClusterSummary,
+  OpeningClusterOptions,
+  OpeningExample,
+  OpeningPercentBand,
+} from "./openingClusters.js";
 export {
   getAerialFrameData,
   getDeathDirection,
@@ -94,4 +112,7 @@ export type {
   RecoverySpan,
   ShieldBlockRecord,
   WhiffEvent,
+  OpeningEvent,
+  OpeningSituation,
+  OpeningFamily,
 } from "./types.js";

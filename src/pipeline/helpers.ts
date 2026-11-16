@@ -1,6 +1,7 @@
 import {
   characters as characterUtils,
   moves as moveUtils,
+  stages as stageUtils,
   State,
   Frames,
   GameEndMethod,
@@ -36,6 +37,12 @@ export function getCharacterName(id: number | undefined): string {
 
 export function getMoveName(id: number): string {
   return moveUtils.getMoveShortName(id);
+}
+
+/** Map the stored stage display name back to its numeric id (null for unknown). */
+export function stageIdFromName(name: string): number | null {
+  const stage = stageUtils.getStages().find((s) => s.name === name);
+  return stage ? stage.id : null;
 }
 
 export function ratio(count: number, total: number): number {
