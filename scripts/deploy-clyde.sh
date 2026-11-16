@@ -5,16 +5,23 @@
 #   ./scripts/deploy-clyde.sh [--assets] [--replays] [--skip-install] [--skip-smoke]
 #
 # What it does:
-#   1. rsyncs the source (excluding node_modules, .git, site, screenshots, renders)
-#   2. optionally copies the Melee ISO and Slippi Playback AppImage, then
+#   1. pushes the current branch to the git remote the server clones from
+#   2. fast-forwards the server checkout (an actual `git clone` at ~/clippi;
+#      untracked runtime files such as key.env, docker.env and data/ are left
+#      untouched)
+#   3. optionally copies the Melee ISO and Slippi Playback AppImage, then
 #      extracts the AppImage (no libfuse2 needed)
-#   3. optionally copies ~/Slippi replays, keeping existing server files
-#   4. runs npm ci on the server
-#   5. writes ~/clippi/key.env if missing (never overwrites it)
-#   6. runs a chronological query against one replay as a smoke test
+#   4. optionally copies ~/Slippi replays, keeping existing server files
+#   5. runs npm ci on the server
+#   6. writes ~/clippi/key.env if missing (never overwrites it)
+#   7. runs a chronological query against one replay as a smoke test
+#
+# The server checkout must already exist as a clone of the remote; create it
+# once with `git clone https://github.com/nmannes/TheMAGI.git ~/clippi`.
 #
 # Safe to re-run. Override paths with MAGI_TARGET, MELEE_ISO,
-# SLIPPI_PLAYBACK_APPIMAGE, REPLAY_DIR, CLYDE_HOST, CLYDE_DIR or CLYDE_ASSETS.
+# SLIPPI_PLAYBACK_APPIMAGE, REPLAY_DIR, CLYDE_HOST, CLYDE_DIR, CLYDE_ASSETS,
+# GIT_REMOTE or GIT_BRANCH.
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)
@@ -25,6 +32,8 @@ LOCAL_ISO="${MELEE_ISO:-$HOME/Desktop/smash.iso}"
 LOCAL_PLAYBACK="${SLIPPI_PLAYBACK_APPIMAGE:-$HOME/.config/Slippi Launcher/playback/Slippi_Playback-x86_64.AppImage}"
 LOCAL_REPLAYS="${REPLAY_DIR:-$HOME/Slippi}"
 TARGET="${MAGI_TARGET:-POOK#392}"
+GIT_REMOTE="${GIT_REMOTE:-upstream}"
+GIT_BRANCH="${GIT_BRANCH:-main}"
 
 COPY_ASSETS=0
 COPY_REPLAYS=0
@@ -61,23 +70,16 @@ remote() {
   ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "$@"
 }
 
-log "syncing source to $HOST:~/$REMOTE_DIR (small tree: no node_modules/.git/site/screenshots/renders)"
-rsync -az --info=progress2 \
-  --exclude node_modules \
-  --exclude .git \
-  --exclude site \
-  --exclude screenshots \
-  --exclude renders \
-  --exclude replays \
-  --exclude assets \
-  --exclude test-replays \
-  --exclude dist \
-  --exclude .vite \
-  --exclude key.env \
-  --exclude docker.env \
-  --exclude data \
-  --exclude '*.log' \
-  "$ROOT_DIR/" "$HOST:$REMOTE_DIR/"
+if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
+  echo "working tree has uncommitted changes; commit them first (the server pulls from git)" >&2
+  exit 1
+fi
+
+log "pushing $GIT_BRANCH to $GIT_REMOTE (the server clones from this remote)"
+git -C "$ROOT_DIR" push "$GIT_REMOTE" "$GIT_BRANCH"
+
+log "fast-forwarding $HOST:~/$REMOTE_DIR (git clone; untracked key.env/docker.env/data stay put)"
+remote "cd \"\$HOME/$REMOTE_DIR\" && git pull --ff-only"
 
 remote "mkdir -p \"\$HOME/$REMOTE_ASSETS\""
 

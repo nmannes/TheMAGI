@@ -119,24 +119,33 @@ cursor advanced to frame 561 inside the same replay. This confirms the
 retry-on-failure behavior: a failed render or send is retried by the next run
 because the cursor only moves after delivery succeeds.
 
+### Current deployment (2026-11-15)
+
+- `~/clippi` on clyde is an actual `git clone` of
+  `nmannes/TheMAGI`; `scripts/deploy-clyde.sh` now pushes and fast-forwards
+  instead of rsyncing. `key.env`, `docker.env` and `data/` were restored as
+  untracked runtime files after the clone, and the clone reports a clean
+  `git status` at the pushed commit.
+- The clip job runs **locally** from cron at 08:17, 14:17 and 20:17:
+  `17 8,14,20 * * * bash /home/nathan/scratch/clippi/scripts/hit-review-daily.sh >> ~/.magi-melee/hit-review.log 2>&1`.
+  A dry run with a cron-minimal environment (`env -i`) confirmed the wrapper
+  resolves Node through `HIT_REVIEW_PATH` and picks the next two events after
+  the cursor. Local render + Telegram delivery was verified earlier the same
+  day; the first scheduled run is the final cron-path proof.
+- `scripts/sync-replays-clyde.sh` runs locally from cron at :07 and :37 and
+  mirrors `~/Slippi` to `clyde:~/Slippi` with `--ignore-existing`.
+
 ## What is next
 
-1. **Telegram credentials on clyde.** Locally they live in `docker.env`
-   (gitignored) and were verified with `--telegram-check` plus real messages.
-   Clyde's `key.env` still needs `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`;
-   `docker.env` is deliberately not rsynced.
-2. **Deploy to clyde.** Sync source/assets/replays with
-   `scripts/deploy-clyde.sh`, confirm the chronological smoke query passes,
-   then do one server-side dry run before any real render.
-3. **Enable the schedule.** Install cron or the systemd timer described in
-   [the daily job section](hit-review.md#daily-cron-job) only after the deploy
-   is verified.
-4. **Docker verification.** Build the image and run the same two-clip query
+1. **First scheduled run.** Check `~/.magi-melee/hit-review.log` and Telegram
+   after 08:17 to confirm the cron path renders and delivers two clips.
+2. **Docker verification.** Build the image and run the same two-clip query
    with real mounts, since the container path now defaults to
    `/data/hit-review-cursor.json`.
-5. **Decide on the legacy mode.** The cost-ranked mode (`hit`/`death` labels,
-   `--state`, `--since-hours`, `--all`) still exists for manual use. Remove it
-   once the chronological job has run for a while.
+3. **Decide on the legacy mode.** The cost-ranked mode (`hit`/`death` labels,
+   `--state`, `--since-hours`, `--all`) still exists for manual use behind
+   `--legacy-ranked`. Remove it once the chronological job has run for a
+   while.
 
 ## Open questions and known limits
 

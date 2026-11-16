@@ -330,14 +330,23 @@ Check it with `systemctl --user list-timers` and
    chmod 600 key.env
    ```
 
-4. Sync replays from the gaming machine. Replays are immutable, so
+4. Sync replays from the gaming machine. `scripts/sync-replays-clyde.sh` does
+   this with a lock and a reachability check; replays are immutable, so
    `--ignore-existing` is safe:
 
    ```bash
-   rsync -av --ignore-existing ~/Slippi/ server:/opt/clippi/replays/
+   ./scripts/sync-replays-clyde.sh
    ```
 
-   Then set `REPLAY_DIR=/opt/clippi/replays` in `key.env`. Syncthing works too;
+   Run it from cron on the machine where Dolphin saves replays, for example
+   every 30 minutes:
+
+   ```cron
+   7,37 * * * * /opt/clippi/scripts/sync-replays-clyde.sh >> /home/pook/.magi-melee/replay-sync.log 2>&1
+   ```
+
+   The script syncs to `~/Slippi` on the server unless `CLYDE_REPLAYS` says
+   otherwise; set `REPLAY_DIR` in `key.env` to match. Syncthing works too;
    point `REPLAY_DIR` at the synced folder.
 
 5. Run one dry run, then one real run with `--limit 1`, before enabling the

@@ -4,6 +4,7 @@
 
 - Make chronological review the default for the hit-review CLI. The earlier cost-ranked selection requires `--legacy-ranked`, and its `--state`, `--since-hours`, `--all`, and `--no-state` options are rejected without it; `--chronological` remains accepted for compatibility with older scripts.
 - Fix the hit-review daily wrapper resolving `npx` before sourcing `key.env`, which ignored `HIT_REVIEW_PATH` and could run a system Node the project does not support under cron. Argument parsing now lives in `src/hitReviewCliArgs.ts` with regression tests.
+- Deploy the clyde server from an actual git clone: `scripts/deploy-clyde.sh` now pushes the current branch and fast-forwards the server checkout instead of rsyncing a source tree. Add `scripts/sync-replays-clyde.sh`, a locked, additive rsync of the replay folder for cron.
 
 ## 1.13.0 — 2026-11-15
 
