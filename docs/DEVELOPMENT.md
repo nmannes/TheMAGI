@@ -60,7 +60,7 @@ CI runs type checking, tests, lint, and formatting on pull requests and pushes t
 
 ## Historical Replay Backfill
 
-New imports automatically populate MAGI's detailed event tables. Games imported before those tables were introduced, or parsed by older event detectors, need a backfill for the full Character analytics suite and for AI coaching history, including measured DI, recovery routes, shield decisions, habit instances, whiff-punish data, and the neutral opening ledger (`opening_events`).
+New imports automatically populate MAGI's detailed event tables. Games imported before those tables were introduced, or parsed by older event detectors, need a backfill for the full Character analytics suite and for AI coaching history, including measured DI, recovery routes, shield decisions, habit instances, whiff-punish data, the neutral opening ledger (`opening_events`), and the combo-ending ledger (`combo_ending_events`).
 
 Each game records the detector version that wrote its event rows. A plain run processes games with no event data and games parsed by an older detector version; `--force` reprocesses everything. Until a game is reprocessed, coaching history leaves out its death verdicts and habit punish rates instead of mixing old and new definitions.
 
@@ -122,11 +122,22 @@ npm run openings -- --no-clusters
 npm run openings -- --render
 npm run openings -- --send --bucket 1 --clips 2
 npm run openings -- --send --cluster 2 --resolution 480p
+
+# How your combos end: exact ender, victim end state, post-hit decisions
+npm run combo-endings -- --character Marth --opponent Fox --limit 200
+
+# Print each ender's end-percent band distribution
+npm run combo-endings -- --bands
+
+# Machine-readable combo-ending report
+npm run combo-endings -- --json
 ```
 
 The opening CLI reads the v18 `opening_events` table, so the games must be imported (or backfilled) with the current detector version. `--target` verifies the configured target player; stored rows are resolved against that target at import time and cannot be re-perspectived by the flag. `--percent-band` accepts `0-30`, `30-60`, `60-90`, `90-120`, `120+` (or their labels) and filters before aggregation, so coverage, buckets, sequences, and examples all describe that band. Bands are half-open: 29 stays in 0–30% and 30 starts 30–60%. `--bands` adds each sequence's band counts and kills; the sequence summary always includes its p25–p75 and median pre-hit percent.
 
-`--render` and `--send` use the same headless Slippi playback path as the hit-review CLI: 5 seconds before the opening event frame and 2 seconds after it, capped at the replay's last frame. Without `--bucket` or `--cluster` the most frequent rule bucket is used; examples come from that bucket/cluster newest-first. `--cluster` refers to a conversion-sequence cluster by the displayed id, not a rule bucket. `--send` requires `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the environment (the daily hit-review wrapper loads them from `key.env`).
+`--render` and `--send` use the same headless Slippi playback path as the hit-review CLI: 10 seconds before the opening event frame and 2 seconds after it, capped at the replay's last frame. Without `--bucket` or `--cluster` the most frequent rule bucket is used; examples come from that bucket/cluster newest-first. `--cluster` refers to a conversion-sequence cluster by the displayed id, not a rule bucket. `--send` requires `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the environment (the daily hit-review wrapper loads them from `key.env`).
+
+The combo-ending CLI reads the v19 `combo_ending_events` table, so its games must be imported (or backfilled) with the current detector version. It describes one own conversion per row, anchored on the final connected hit — not a verified true combo and not `conversion.endFrame`. `--bands` adds each ender's half-open end-percent bands; only games with current event rows are aggregated, and rows below the shared sample guards are marked low-sample.
 
 Database-backed Node CLIs can report `NODE_MODULE_VERSION` after native packages have been rebuilt for Electron. The backfill command above deliberately runs through Electron's Node runtime to avoid that mismatch.
 

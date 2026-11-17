@@ -118,6 +118,7 @@ const api = {
   getCharacterGameStats: (character: string) => ipcRenderer.invoke("stats:characterGameStats", character),
   getCharacterEventProfile: (character: string) => ipcRenderer.invoke("stats:characterEventProfile", character),
   getOpeningsAgainst: (filters: unknown) => ipcRenderer.invoke("stats:openingsAgainst", filters),
+  getComboEndings: (filters: unknown) => ipcRenderer.invoke("stats:comboEndings", filters),
   getOpponentDetail: (opponentKey: string) => ipcRenderer.invoke("stats:opponentDetail", opponentKey),
   getDashboardHighlights: () => ipcRenderer.invoke("stats:dashboardHighlights"),
   getGameHighlights: (gameId: number) => ipcRenderer.invoke("stats:gameHighlights", gameId),

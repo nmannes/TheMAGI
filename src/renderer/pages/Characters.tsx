@@ -19,6 +19,7 @@ const CoachingModal = lazy(() => import("../components/CoachingModal").then((m) 
 const IdentityCard = lazy(() => import("./characters/IdentityCard").then((m) => ({ default: m.IdentityCard })));
 const FormStrip = lazy(() => import("./characters/FormStrip").then((m) => ({ default: m.FormStrip })));
 const PunishEconomy = lazy(() => import("./characters/PunishEconomy").then((m) => ({ default: m.PunishEconomy })));
+const ComboEnders = lazy(() => import("./characters/ComboEnders").then((m) => ({ default: m.ComboEnders })));
 const HabitLedger = lazy(() => import("./characters/HabitLedger").then((m) => ({ default: m.HabitLedger })));
 const RecoveryMatrix = lazy(() => import("./characters/RecoveryMatrix").then((m) => ({ default: m.RecoveryMatrix })));
 const DeathReport = lazy(() => import("./characters/DeathReport").then((m) => ({ default: m.DeathReport })));
@@ -743,6 +744,12 @@ function CharacterDetail({
               description="When attacks miss, and what happens after blocking."
             >
               <PunishEconomy character={character} color={meta.color} glowColor={meta.glowColor} />
+            </CharacterDisclosure>
+            <CharacterDisclosure
+              title="How your combos end"
+              description="The exact move each conversion ends with, the victim's end state, and what you do after the hit."
+            >
+              <ComboEnders character={character} color={meta.color} glowColor={meta.glowColor} />
             </CharacterDisclosure>
             <CharacterDisclosure
               title="Repeated habits"

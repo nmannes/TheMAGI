@@ -14,6 +14,7 @@
 import { EVENT_SAMPLE_GUARDS } from "../characterEventProfile.js";
 import type { GameFrameEvents, PlayerSlot } from "./frameEvents.js";
 import { moveIdToName, getMoveName } from "./helpers.js";
+import { summarizeComboEndings } from "./comboEndings.js";
 
 export interface PatternHabit {
   situation: string;
@@ -54,6 +55,30 @@ export interface PatternOpeningsAgainst {
   buckets: PatternOpeningBucket[];
 }
 
+export interface PatternComboEnder {
+  label: string;
+  family: string;
+  count: number;
+  kills: number;
+}
+
+/**
+ * Own conversions' endings (see pipeline/comboEndingEvents.ts): the exact
+ * final move and the measured post-hit outcomes. Not a true-combo claim, and
+ * `squandered` only says the conversion ended at >=100% without a stock.
+ */
+export interface PatternComboEndings {
+  total: number;
+  kills: number;
+  squandered: number;
+  enders: PatternComboEnder[];
+  extended: number;
+  whiffed: number;
+  punished: number;
+  edgeguardLinked: number;
+  topPunishOpeners: { move: string; count: number }[];
+}
+
 export interface PatternData {
   label: string;
   games: number;
@@ -61,6 +86,7 @@ export interface PatternData {
   currentGames: number;
   habits: PatternHabit[];
   openingsAgainst: PatternOpeningsAgainst;
+  comboEndings: PatternComboEndings;
   deaths: {
     total: number;
     verdicts: Record<string, number>;
@@ -219,6 +245,11 @@ export function patternsFromFrameEvents(events: GameFrameEvents, slot: PlayerSlo
     kills: list.filter((r) => r.landing === "death").length,
   }));
 
+  const ownEndings = events.comboEndings.filter((e) => e.attackerSlot === slot);
+  const comboSummary = summarizeComboEndings(ownEndings);
+  const outcome = (key: "extended" | "whiffed" | "punished" | "edgeguard-linked") =>
+    comboSummary.outcomes.find((o) => o.key === key)?.count ?? 0;
+
   return {
     label,
     games: 1,
@@ -229,6 +260,22 @@ export function patternsFromFrameEvents(events: GameFrameEvents, slot: PlayerSlo
       games: openings.length > 0 ? 1 : 0,
       kills: openings.filter((o) => o.didKill).length,
       buckets: openingBuckets,
+    },
+    comboEndings: {
+      total: comboSummary.total,
+      kills: comboSummary.kills,
+      squandered: comboSummary.squandered,
+      enders: comboSummary.enders.map((e) => ({
+        label: e.label,
+        family: e.family,
+        count: e.count,
+        kills: e.kills,
+      })),
+      extended: outcome("extended"),
+      whiffed: outcome("whiffed"),
+      punished: outcome("punished"),
+      edgeguardLinked: outcome("edgeguard-linked"),
+      topPunishOpeners: comboSummary.cost.topPunishOpeners.map((o) => ({ move: o.label, count: o.count })),
     },
     deaths: { total: deaths.length, verdicts, resourceFaults: deaths.filter((d) => d.resourceFault).length, byKiller },
     throwDI,
@@ -313,6 +360,27 @@ export function mergePatternData(parts: PatternData[], label: string): PatternDa
           kills: a.kills + b.kills,
         }),
       ).sort((a, b) => b.count - a.count || b.kills - a.kills || a.label.localeCompare(b.label)),
+    },
+    comboEndings: {
+      total: sum((p) => p.comboEndings.total),
+      kills: sum((p) => p.comboEndings.kills),
+      squandered: sum((p) => p.comboEndings.squandered),
+      enders: mergeBy(
+        parts.map((p) => p.comboEndings.enders),
+        (e) => `${e.family}\u0000${e.label}`,
+        (a, b) => ({ label: a.label, family: a.family, count: a.count + b.count, kills: a.kills + b.kills }),
+      ).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+      extended: sum((p) => p.comboEndings.extended),
+      whiffed: sum((p) => p.comboEndings.whiffed),
+      punished: sum((p) => p.comboEndings.punished),
+      edgeguardLinked: sum((p) => p.comboEndings.edgeguardLinked),
+      topPunishOpeners: mergeBy(
+        parts.map((p) => p.comboEndings.topPunishOpeners),
+        (o) => o.move,
+        (a, b) => ({ move: a.move, count: a.count + b.count }),
+      )
+        .sort((a, b) => b.count - a.count || a.move.localeCompare(b.move))
+        .slice(0, 5),
     },
     deaths: {
       total: sum((p) => p.deaths.total),
@@ -649,6 +717,97 @@ function openingsSection(columns: Column[]): string[] {
   return out;
 }
 
+function comboEndingsSection(columns: Column[]): string[] {
+  const out: string[] = [];
+  const any = columns.some((c) => c.data.comboEndings.total > 0);
+  if (!any) return out;
+  const broad = columns.filter((c) => !c.single).at(-1)?.data ?? columns[0]!.data;
+  const minN = EVENT_SAMPLE_GUARDS.comboDecisionMin;
+
+  out.push(
+    "How your combos end — one of your own conversions per row, anchored on the final connected hit (not a verified true combo; conversions can span tech chases and ledge traps). The ender is the exact final move:",
+  );
+
+  const volume = columns
+    .map((col) => {
+      const e = col.data.comboEndings;
+      if (e.total === 0) return null;
+      return `${col.data.label} ${e.total} ending${e.total === 1 ? "" : "s"}${col.single ? "" : ` in ${col.data.games} game${col.data.games === 1 ? "" : "s"}`}`;
+    })
+    .filter((x): x is string => x != null);
+  if (volume.length > 0) out.push(`  Endings: ${volume.join(" · ")}`);
+
+  const killRate = line(
+    "Endings that took the stock",
+    compareRate(
+      columns,
+      (d) => (d.comboEndings.total > 0 ? { n: d.comboEndings.kills, d: d.comboEndings.total } : null),
+      minN,
+    ),
+  );
+  if (killRate) out.push(killRate);
+
+  const squandered = line(
+    "Ended at ≥100% without the stock (a fact, not a missed-kill claim)",
+    compareRate(
+      columns,
+      (d) => (d.comboEndings.total > 0 ? { n: d.comboEndings.squandered, d: d.comboEndings.total } : null),
+      minN,
+    ),
+  );
+  if (squandered) out.push(squandered);
+
+  for (const [key, label] of [
+    ["extended", "After the last hit — a new conversion of yours started within 30f"],
+    ["whiffed", "Your first post-hit direct attack or grab never connected (specials unverified)"],
+    ["punished", "You were punished (opponent conversion started within 30f of your first actionable frame)"],
+    ["edgeguardLinked", "Victim left offstage/ledging and their recovery span overlapped your post-hit window"],
+  ] as const) {
+    const l = line(
+      label,
+      compareRate(
+        columns,
+        (d) => (d.comboEndings.total > 0 ? { n: d.comboEndings[key], d: d.comboEndings.total } : null),
+        minN,
+      ),
+    );
+    if (l) out.push(l);
+  }
+
+  const enderMin = EVENT_SAMPLE_GUARDS.comboEnderMin;
+  const enders = broad.comboEndings.enders.filter((e) => e.count >= enderMin).slice(0, 5);
+  if (enders.length > 0) {
+    out.push(
+      `  Most frequent enders (${broad.label}): ` +
+        enders
+          .map(
+            (e) =>
+              `${e.label} x${e.count} (${e.kills} kill${e.kills === 1 ? "" : "s"}, ${pct(e.kills, e.count)}%${e.family !== "aerial" ? `, ${e.family}` : ""})`,
+          )
+          .join("; "),
+    );
+  }
+
+  const openers = broad.comboEndings.topPunishOpeners.slice(0, 3);
+  if (openers.length > 0 && broad.comboEndings.punished > 0) {
+    out.push(
+      `  Their most common punish opener after your hit (${broad.label}): ` +
+        openers.map((o) => `${o.move} x${o.count}`).join(", "),
+    );
+  }
+
+  if (broad.comboEndings.total < minN) {
+    out.push(
+      `  Low n: ${broad.comboEndings.total} own conversion${broad.comboEndings.total === 1 ? "" : "s"} in ${broad.label} — describe these endings, do not call any of them a habit.`,
+    );
+  } else if (enders.length === 0) {
+    out.push(
+      `  No single ender reaches ${enderMin} occurrences in ${broad.label}; the endings are spread across too many moves to name one default ender.`,
+    );
+  }
+  return out;
+}
+
 /**
  * The cross-game block. Columns: this game (optional), matchup history
  * (optional), character history. Returns [] when there is no history at all.
@@ -690,6 +849,9 @@ export function formatRecurringPatterns(
 
   const openings = openingsSection(columns);
   if (openings.length > 0) lines.push(...openings, "");
+
+  const comboEndings = comboEndingsSection(columns);
+  if (comboEndings.length > 0) lines.push(...comboEndings, "");
 
   const d = deathSection(columns);
   if (d.length > 0) lines.push(...d, "");
@@ -851,6 +1013,14 @@ export function formatPatternBreakdown(rows: PatternData[]): string[] {
     if (habitCell) parts.push(`ledge/knockdown/OOS options punished ${habitCell}`);
     const openings = cell(p.openingsAgainst.kills, p.openingsAgainst.total, EVENT_SAMPLE_GUARDS.openingsTotalMin);
     if (openings) parts.push(`openings against you → kill ${openings}`);
+    const punishedEndings = cell(p.comboEndings.punished, p.comboEndings.total, EVENT_SAMPLE_GUARDS.comboDecisionMin);
+    if (punishedEndings) parts.push(`combo endings punished after your hit ${punishedEndings}`);
+    const squanderedEndings = cell(
+      p.comboEndings.squandered,
+      p.comboEndings.total,
+      EVENT_SAMPLE_GUARDS.comboDecisionMin,
+    );
+    if (squanderedEndings) parts.push(`combo endings at ≥100% with no stock ${squanderedEndings}`);
     const noDI = cell(p.deaths.verdicts.NO_DI ?? 0, p.deaths.total, EVENT_SAMPLE_GUARDS.deathVerdictMin);
     if (noDI) parts.push(`deaths with no DI input ${noDI}`);
     const capture = cell(p.whiffCapture.punished, p.whiffCapture.opportunities, EVENT_SAMPLE_GUARDS.whiffCaptureMin);

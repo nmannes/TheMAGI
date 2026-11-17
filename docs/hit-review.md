@@ -15,12 +15,12 @@ event types:
 
 1. **Opening hit taken** — the first hit of a conversion landed by the opponent,
    with the target as the victim. Follow-up hits in that conversion are not
-   separate events. The clip starts 5 seconds (300 frames) before that first hit
+   separate events. The clip starts 10 seconds (600 frames) before that first hit
    and ends 2 seconds (120 frames) after it. The caption also reports what the
    full opponent conversion became, without putting those follow-up hits in the
    video.
 2. **Conversion landed** — a conversion where the target is the attacker and at
-   least two hits connected. The clip starts 5 seconds before the first hit and
+   least two hits connected. The clip starts 10 seconds before the first hit and
    ends 5 seconds (300 frames) after the target's last hit. A one-hit conversion
    is not enough for this event.
 
@@ -68,7 +68,7 @@ npm run openings -- --send --cluster 2
 npm run openings -- --render --bucket 2 --clips 3 --out ~/clips
 ```
 
-Clips use 5 seconds of lead-in and 2 seconds after the opening event frame,
+Clips use 10 seconds of lead-in and 2 seconds after the opening event frame,
 the same bounds as the chronological opening-hit event. The caption names the
 measured rule bucket or conversion sequence, its sample size, the pre-hit percent,
 and the full conversion's damage and stock outcome. `--send` reads `TELEGRAM_BOT_TOKEN` and
@@ -96,6 +96,10 @@ sudo apt install ffmpeg xvfb libgl1-mesa-dri libglx-mesa0 libopengl0 libfuse2
 
 `libopengl0` is the one people miss: without it the Slippi playback binary
 fails at startup with `libOpenGL.so.0: cannot open shared object file`.
+
+To avoid installing any of these on the host, run the job in the
+[Docker container](docker.md); the image includes ffmpeg, Xvfb, Mesa and
+`libopengl0`.
 
 If the AppImage cannot mount on the server, extract it once and point
 `SLIPPI_PLAYBACK` at the extracted `AppRun`:

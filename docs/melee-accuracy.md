@@ -55,7 +55,33 @@ Rule buckets group by situation × opener family × exact move and are the autho
 
 The same opening can mean something different at low and high percent, so each sequence also reports the **pre-hit victim percent** (the percent at the first hit, never the conversion's end): mean, median, the middle 50% (p25–p75), and counts/kills in five half-open bands — `[0, 30)`, `[30, 60)`, `[60, 90)`, `[90, 120)`, and `[120, ∞)`. For example, 29 belongs to 0–30% and 30 starts 30–60%. A `percentBand` filter scopes the entire query (baseline, rule buckets, sequences, examples) to one band. The bands are descriptive groupings chosen for readability, not verified combo-validity or DI-reaction thresholds, and a distribution over a small sequence sample can be noisy — the UI and CLI report the sample size beside it.
 
-A clip for a bucket or cluster is anchored on the opening event frame with 5 seconds of lead-in and 2 seconds after the hit, matching the chronological hit-review "opening hit taken" event. The caption reports the bucket/cluster sample size and the full conversion's damage and stock outcome; the video itself shows only the opening hit and the immediate response, so a caption never implies the follow-up hits were shown.
+A clip for a bucket or cluster is anchored on the opening event frame with 10 seconds of lead-in and 2 seconds after the hit, matching the chronological hit-review "opening hit taken" event. The caption reports the bucket/cluster sample size and the full conversion's damage and stock outcome; the video itself shows only the opening hit and the immediate response, so a caption never implies the follow-up hits were shown.
+
+### Combo-ending ledger (`src/pipeline/comboEndingEvents.ts`)
+
+The unit is one of the player's **own conversions** (`attackerSlot === userSlot`). It is not a true-combo claim: slippi-js keeps a conversion alive through resets, tech chases, and ledge traps, so the record describes the hits the replay attributes to one conversion.
+
+- **Anchor = final connected hit** (`moves.at(-1).frame`), never `conversion.endFrame`. `endFrame` is 45 frames after the victim regains control, and on a kill it is the stock-drop frame, so anchoring there would miss every early post-hit decision.
+- **Ender** = the exact final move id, its label, and its family (the same classifier as the opening ledger; pummel 52 and throws 53–56 are grabs). No named technique is inferred from the move id.
+- **Attacker first actionable frame**: the attacker's `AttackInstance` containing the final-hit frame supplies `firstActionableFrame`. Multihit and grab sequences can make that match ambiguous, so the fallback is `resolveCommitmentEnd()`, then a bounded 90-frame forward scan for an actionable state; `null` means no actionable frame was observed. Decisions during the final hit's own endlag are not choices and never count.
+- **Post-hit decision window** = first actionable frame through +30 frames, the same convention as the shield punish-taken grade. Wait (14) and Nothing (11) are skipped; being hit, grabbed, or dying ends the window with no commitment. The first classified commitment is recorded:
+  - `attack | special | grab` — extension attempt; `post_hit_connected` requires a true hit (connected and not on shield), and a shield hit is neither a true hit nor a whiff.
+  - `reposition` — walk/turn/dash/run/jump/fall/landing/crouch/platform drop/teeter/ledge movement.
+  - `defend` — shield hold/raise/drop, rolls, spot dodge, air dodge (shieldstun 181 is skipped, not a chosen commitment).
+  - `edgeguard` — only when the victim ended offstage/ledging and the attacker left the stage or took the ledge during the window; it overrides the underlying jump/special/aerial classification.
+  - `none` — nothing classifiable in the window.
+- **Victim end state** follows hitstun, grabs, command grabs, and knockback-collision states to the first free frame, then reports `ledge | knockdown | offstage | airborne | onstage`; dead/dying states report `dead`. Killed conversions are dead by definition and keep the final-hit frame's position and percent as the end measurement. A replay that ends during the launch reports `offstage` when the last observed frame was offstage, otherwise `unknown` — never a guess.
+- **Outcomes are measured flags, not intent:**
+  - `killed` = the conversion's `didKill`. A stock row within 10 frames of `endFrame` supplies the death frame/percent, but a stock is never attributed to a conversion that did not kill.
+  - `extended` = another own conversion starts inside the post-hit window.
+  - `whiffed` = the first post-hit direct attack or grab instance never connected (a shield hit is not a whiff). A `special` is never marked whiffed from a missing hit during its own action state: projectiles can connect after that state ends, so `post_hit_connected` and `post_hit_on_shield` stay `null` (unverified) unless contact is observed.
+  - `punished` = an opponent conversion starts inside the window; the delay, opener move, and damage dealt inside the window are recorded.
+  - `edgeguard-linked` = the victim ended offstage/ledging and a recovery span overlapped the window.
+  - `reset` is derived at aggregation time (no extension, whiff, punish, or edgeguard link) and never persisted.
+- **Squandered** = the conversion ended at `endPercent >= 100` without taking the stock. That is a fact; output never calls it a missed kill, a dropped combo, or overextension.
+- The 30-frame window is a measurement convention. A punish inside it was measured, not proven guaranteed.
+
+Aggregation groups enders by exact move label and family, with kill rate, damage/length averages, the median and middle 50% of the conversion's end percent, and half-open end-percent bands `[0, 30)`, `[30, 60)`, `[60, 90)`, `[90, 120)`, `[120, ∞)`. Rows below `comboEnderMin` (5 endings) and decisions below `comboDecisionMin` (10 endings) are marked low-sample, not hidden.
 
 ### Highlights
 

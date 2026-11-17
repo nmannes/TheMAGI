@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { OpeningsAgainstFilters } from "../../openingsAgainst";
+import type { ComboEndingsFilters } from "../../comboEndings";
 
 const GC_10MIN = 1000 * 60 * 10;
 
@@ -143,6 +144,14 @@ export const useOpeningsAgainst = (filters: OpeningsAgainstFilters) => {
   return useQuery({
     queryKey: ["openingsAgainst", filters],
     queryFn: () => window.clippi.getOpeningsAgainst(filters),
+    gcTime: GC_10MIN,
+  });
+};
+
+export const useComboEndings = (filters: ComboEndingsFilters) => {
+  return useQuery({
+    queryKey: ["comboEndings", filters],
+    queryFn: () => window.clippi.getComboEndings(filters),
     gcTime: GC_10MIN,
   });
 };

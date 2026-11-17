@@ -157,6 +157,7 @@ function events(openings: OpeningEvent[], conversions: ConversionRecord[] = []):
     shieldBlocks: [],
     whiffs: [],
     openings,
+    comboEndings: [],
     attacks: [[], []],
     neutralSegments: [],
   };

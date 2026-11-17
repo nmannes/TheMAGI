@@ -1,25 +1,27 @@
-# Running hit review in Docker
+# Running clip jobs in Docker
 
-The headless hit-review pipeline can run entirely in a container: Node, ffmpeg,
-Xvfb and Mesa are in the image, while the Melee ISO, Slippi Playback build,
-replays, output and credentials are mounted or passed at run time. Nothing
-large or secret is copied into the image or committed to git.
+The headless hit-review pipeline and the openings clip renderer can run
+entirely in a container: Node, ffmpeg, Xvfb and Mesa are in the image, while
+the Melee ISO, Slippi Playback build, replays, database, output and credentials
+are mounted or passed at run time. Nothing large or secret is copied into the
+image or committed to git.
 
-This container is for the command-line hit-review job. It is not a container
-for the Electron desktop app.
+This container is for the command-line clip jobs. It is not a container for the
+Electron desktop app.
 
 ## What is in the image and what is mounted
 
 | Path in container | Source | Purpose |
 | --- | --- | --- |
 | `/app` | image | Source, `node_modules`, scripts |
-| `/replays` | host mount | Slippi `.slp` files (read-only) |
+| `/replays` | host mount | Slippi `.slp` files (read-only; also mounted at its host path for opening-ledger clips) |
 | `/assets` | host mount | Melee ISO and Slippi Playback (read-only) |
 | `/data` | host mount | Rendered clips, chronological cursor/cache, logs |
+| `/home/node/.magi-melee` | host mount | `magi.db`, `config.json` and clip output for `openings` |
 | `MAGI_TARGET`, Telegram variables | `docker.env` or `-e` | Player and delivery settings |
 
 `node_modules` is installed by `npm ci` while the image is built. The ISO,
-AppImage, replays, rendered clips and `docker.env` are covered by
+AppImage, replays, database, rendered clips and `docker.env` are covered by
 `.gitignore` and `.dockerignore`; they never enter version control.
 
 ## Build
@@ -86,8 +88,9 @@ the image. The entrypoint ignores a missing `HIT_REVIEW_PATH` with a warning.
 
 ## Run with Compose
 
-The compose file mounts `./replays`, `./assets` and `./data` by default. Point
-the first two at your real folders with environment variables:
+The compose file mounts `~/Slippi`, `~/clippi-assets`, the repo's `./data` and
+`~/.magi-melee` by default. Point them at your real folders with environment
+variables (the mount sources must be absolute):
 
 ```bash
 HOST_REPLAYS_DIR="$HOME/Slippi" \
@@ -122,6 +125,42 @@ user:
 HOST_UID="$(id -u)" HOST_GID="$(id -g)" docker compose run --rm hit-review
 ```
 
+### Openings clips
+
+The same image, service and wrapper render clips from the opening ledger (the
+`npm run openings -- --render/--send` path). Put `openings` first; the remaining
+arguments go to `src/openings-cli.ts`:
+
+```bash
+scripts/hit-review-docker.sh openings --cluster 4 --clips 3 --send
+scripts/hit-review-docker.sh openings --bucket 1 --render
+scripts/hit-review-docker.sh openings --json --no-clusters
+```
+
+The host `~/.magi-melee` directory is mounted at the container user's home, so
+the CLI reads `magi.db` and `config.json` and writes clips to
+`~/.magi-melee/hit-review` exactly like the host command. `HOST_MAGI_DIR`
+overrides the source directory. Games must already be imported or backfilled at
+the current `FRAME_EVENTS_VERSION` (the `opening_events` ledger); the CLI prints
+a coverage warning when they are not.
+
+Opening rows store each replay's absolute path from import time, so the replay
+folder is mounted at its host path as well as at `/replays`. `HOST_REPLAYS_DIR`
+must be the absolute folder that was imported (the default is `~/Slippi`). If
+files have moved since import, rendering those rows fails rather than using a
+different replay with the same name.
+
+`--send` reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` from `docker.env`,
+like the chronological job. Pass `--out` to choose another output directory
+inside the container; mount it if the clips must remain on the host.
+
+The equivalent direct Compose invocation is:
+
+```bash
+HOST_REPLAYS_DIR="$HOME/Slippi" HOST_ASSETS_DIR="$HOME/clippi-assets" \
+docker compose run --rm hit-review openings --cluster 4 --clips 1 --render
+```
+
 ## Run with docker run
 
 ```bash
@@ -139,6 +178,21 @@ docker run --rm --init \
 Remove `--dry-run` and the `HIT_REVIEW_TELEGRAM=0` override to render and send.
 Arguments after the image name are passed through to the daily wrapper, so
 `--force`, `--all`, `--deaths-only` and `--limit` work as they do on the host.
+
+For openings clips, pass `openings` before the CLI arguments and mount the
+replay folder at its host path plus the MAGI data directory:
+
+```bash
+docker run --rm --init \
+  --shm-size=1g \
+  --user "$(id -u):$(id -g)" \
+  --env-file docker.env \
+  -v "$HOME/Slippi:/replays:ro" \
+  -v "$HOME/Slippi:$HOME/Slippi:ro" \
+  -v "$HOME/hit-review-assets:/assets:ro" \
+  -v "$HOME/.magi-melee:/home/node/.magi-melee" \
+  magi-hit-review:local openings --cluster 4 --clips 1 --render
+```
 
 To invoke the CLI directly (for example to print one replay as JSON), override
 the entrypoint:
@@ -163,10 +217,11 @@ pinned, so the cron entry stays short:
 17 * * * * bash /opt/clippi/scripts/hit-review-docker.sh >> /var/log/hit-review.log 2>&1
 ```
 
-It defaults to `~/Slippi`, `~/clippi-assets`, and the repo's `data/` folder;
-override with `HOST_REPLAYS_DIR`, `HOST_ASSETS_DIR`, and `HOST_DATA_DIR`, and
-rebuild the image after source changes with `scripts/hit-review-docker.sh
---build`. The explicit form, if you prefer it in cron:
+It defaults to `~/Slippi`, `~/clippi-assets`, the repo's `data/` folder and
+`~/.magi-melee`; override with `HOST_REPLAYS_DIR`, `HOST_ASSETS_DIR`,
+`HOST_DATA_DIR` and `HOST_MAGI_DIR`, and rebuild the image after source changes
+with `scripts/hit-review-docker.sh --build`. The explicit form, if you prefer it
+in cron:
 
 ```cron
 17 20 * * * cd /opt/clippi && HOST_REPLAYS_DIR=/srv/slippi HOST_ASSETS_DIR=/opt/hit-review-assets HOST_DATA_DIR=/srv/hit-review docker compose run --rm hit-review >> /var/log/hit-review.log 2>&1
@@ -183,6 +238,15 @@ tool created.
 **`Slippi Playback not found under /assets`** — mount the folder containing
 `smash.iso` and either `slippi-playback/squashfs-root/AppRun` or the AppImage at
 `/assets`. The ISO may also be named `melee.iso`.
+
+**`openings` reports the database is missing** — mount the host MAGI data
+directory (`HOST_MAGI_DIR`, default `~/.magi-melee`) at
+`/home/node/.magi-melee`. The compose service does this automatically.
+
+**An openings clip cannot find its replay** — the opening ledger stores the
+replay's absolute path from import time. Set `HOST_REPLAYS_DIR` to that same
+absolute folder; the compose service mounts it both at `/replays` and at its
+host path. Rows whose files moved since import must be re-imported instead.
 
 **Dolphin prints OpenGL or display errors** — the image includes Xvfb and Mesa.
 If you changed the image, confirm `libgl1-mesa-dri` and `xvfb` are still

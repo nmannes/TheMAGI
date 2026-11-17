@@ -9,7 +9,20 @@ import type { AggregateStats, PlayerHistory } from "./pipeline/index.js";
 import type { CharacterEventProfile } from "./characterEventProfile.js";
 import { moveIdToName, stageIdFromName } from "./pipeline/helpers.js";
 import { FRAME_EVENTS_VERSION } from "./pipeline/frameEvents.js";
-import type { OpeningEvent } from "./pipeline/frameEvents.js";
+import type {
+  ComboEnderFamily,
+  ComboEndingEvent,
+  OpeningEvent,
+  PostHitDecision,
+  VictimEndState,
+} from "./pipeline/frameEvents.js";
+import { summarizeComboEndings } from "./pipeline/comboEndings.js";
+import {
+  COMBO_ENDINGS_DEFAULT_LIMIT,
+  COMBO_ENDINGS_MAX_LIMIT,
+  type ComboEndingsFilters,
+  type ComboEndingsResult,
+} from "./comboEndings.js";
 import {
   aggregateOpeningBuckets,
   clusterOpenings,
@@ -367,6 +380,51 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_opening_events_game ON opening_events(game_id);
   CREATE INDEX IF NOT EXISTS idx_opening_events_game_victim ON opening_events(game_id, victim_is_player);
   CREATE INDEX IF NOT EXISTS idx_opening_events_lookup ON opening_events(victim_is_player, situation, opener_family);
+
+  CREATE TABLE IF NOT EXISTS combo_ending_events (
+    id INTEGER PRIMARY KEY,
+    game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    attacker_is_player INTEGER NOT NULL,
+    conversion_start_frame INTEGER NOT NULL,
+    last_hit_frame INTEGER NOT NULL,
+    conversion_end_frame INTEGER,
+    opener_move_id INTEGER,
+    ender_move_id INTEGER,
+    ender_label TEXT NOT NULL,
+    ender_family TEXT NOT NULL,
+    opening_type TEXT NOT NULL,
+    move_count INTEGER NOT NULL,
+    damage REAL NOT NULL,
+    start_percent REAL NOT NULL,
+    end_percent REAL NOT NULL,
+    did_kill INTEGER NOT NULL DEFAULT 0,
+    victim_end_state TEXT NOT NULL,
+    victim_end_x REAL,
+    victim_end_y REAL,
+    victim_end_percent REAL,
+    attacker_first_actionable_frame INTEGER,
+    frames_from_last_hit_to_actionable INTEGER,
+    post_hit_decision TEXT NOT NULL,
+    post_hit_move_id INTEGER,
+    post_hit_move_label TEXT,
+    post_hit_start_frame INTEGER,
+    post_hit_connected INTEGER,
+    post_hit_on_shield INTEGER,
+    extended INTEGER NOT NULL DEFAULT 0,
+    whiffed INTEGER NOT NULL DEFAULT 0,
+    punished INTEGER NOT NULL DEFAULT 0,
+    punish_delay INTEGER,
+    punish_opener_move_id INTEGER,
+    punish_damage REAL NOT NULL DEFAULT 0,
+    edgeguard_linked INTEGER NOT NULL DEFAULT 0,
+    victim_death_percent REAL,
+    death_frame INTEGER
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_combo_ending_events_game ON combo_ending_events(game_id);
+  CREATE INDEX IF NOT EXISTS idx_combo_ending_events_game_attacker ON combo_ending_events(game_id, attacker_is_player);
+  CREATE INDEX IF NOT EXISTS idx_combo_ending_events_ender ON combo_ending_events(attacker_is_player, ender_move_id);
+  CREATE INDEX IF NOT EXISTS idx_combo_ending_events_decision ON combo_ending_events(attacker_is_player, post_hit_decision, punished);
 `;
 
 // ── Migration system ─────────────────────────────────────────────────
@@ -815,6 +873,57 @@ const migrations: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_opening_events_game ON opening_events(game_id);
         CREATE INDEX IF NOT EXISTS idx_opening_events_game_victim ON opening_events(game_id, victim_is_player);
         CREATE INDEX IF NOT EXISTS idx_opening_events_lookup ON opening_events(victim_is_player, situation, opener_family);
+      `);
+    },
+  },
+  {
+    version: 19,
+    description: "Per-instance combo-ending ledger: final-hit anchor, ender and post-hit decisions",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS combo_ending_events (
+          id INTEGER PRIMARY KEY,
+          game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+          attacker_is_player INTEGER NOT NULL,
+          conversion_start_frame INTEGER NOT NULL,
+          last_hit_frame INTEGER NOT NULL,
+          conversion_end_frame INTEGER,
+          opener_move_id INTEGER,
+          ender_move_id INTEGER,
+          ender_label TEXT NOT NULL,
+          ender_family TEXT NOT NULL,
+          opening_type TEXT NOT NULL,
+          move_count INTEGER NOT NULL,
+          damage REAL NOT NULL,
+          start_percent REAL NOT NULL,
+          end_percent REAL NOT NULL,
+          did_kill INTEGER NOT NULL DEFAULT 0,
+          victim_end_state TEXT NOT NULL,
+          victim_end_x REAL,
+          victim_end_y REAL,
+          victim_end_percent REAL,
+          attacker_first_actionable_frame INTEGER,
+          frames_from_last_hit_to_actionable INTEGER,
+          post_hit_decision TEXT NOT NULL,
+          post_hit_move_id INTEGER,
+          post_hit_move_label TEXT,
+          post_hit_start_frame INTEGER,
+          post_hit_connected INTEGER,
+          post_hit_on_shield INTEGER,
+          extended INTEGER NOT NULL DEFAULT 0,
+          whiffed INTEGER NOT NULL DEFAULT 0,
+          punished INTEGER NOT NULL DEFAULT 0,
+          punish_delay INTEGER,
+          punish_opener_move_id INTEGER,
+          punish_damage REAL NOT NULL DEFAULT 0,
+          edgeguard_linked INTEGER NOT NULL DEFAULT 0,
+          victim_death_percent REAL,
+          death_frame INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_combo_ending_events_game ON combo_ending_events(game_id);
+        CREATE INDEX IF NOT EXISTS idx_combo_ending_events_game_attacker ON combo_ending_events(game_id, attacker_is_player);
+        CREATE INDEX IF NOT EXISTS idx_combo_ending_events_ender ON combo_ending_events(attacker_is_player, ender_move_id);
+        CREATE INDEX IF NOT EXISTS idx_combo_ending_events_decision ON combo_ending_events(attacker_is_player, post_hit_decision, punished);
       `);
     },
   },
@@ -1483,6 +1592,99 @@ export function insertOpeningEvents(gameId: number, rows: OpeningEventRow[]): vo
   }
 }
 
+export interface ComboEndingEventRow {
+  attackerIsPlayer: boolean;
+  conversionStartFrame: number;
+  lastHitFrame: number;
+  conversionEndFrame: number | null;
+  openerMoveId: number | null;
+  enderMoveId: number | null;
+  enderLabel: string;
+  enderFamily: string;
+  openingType: string;
+  moveCount: number;
+  damage: number;
+  startPercent: number;
+  endPercent: number;
+  didKill: boolean;
+  victimEndState: string;
+  victimEndX: number | null;
+  victimEndY: number | null;
+  victimEndPercent: number | null;
+  attackerFirstActionableFrame: number | null;
+  framesFromLastHitToActionable: number | null;
+  postHitDecision: string;
+  postHitMoveId: number | null;
+  postHitMoveLabel: string | null;
+  postHitStartFrame: number | null;
+  postHitConnected: boolean | null;
+  postHitOnShield: boolean | null;
+  extended: boolean;
+  whiffed: boolean;
+  punished: boolean;
+  punishDelay: number | null;
+  punishOpenerMoveId: number | null;
+  punishDamage: number;
+  edgeguardLinked: boolean;
+  victimDeathPercent: number | null;
+  deathFrame: number | null;
+}
+
+export function insertComboEndingEvents(gameId: number, rows: ComboEndingEventRow[]): void {
+  if (rows.length === 0) return;
+  const stmt = getDb().prepare(`
+    INSERT INTO combo_ending_events (
+      game_id, attacker_is_player, conversion_start_frame, last_hit_frame, conversion_end_frame,
+      opener_move_id, ender_move_id, ender_label, ender_family, opening_type, move_count, damage,
+      start_percent, end_percent, did_kill, victim_end_state, victim_end_x, victim_end_y,
+      victim_end_percent, attacker_first_actionable_frame, frames_from_last_hit_to_actionable,
+      post_hit_decision, post_hit_move_id, post_hit_move_label, post_hit_start_frame,
+      post_hit_connected, post_hit_on_shield, extended, whiffed, punished, punish_delay,
+      punish_opener_move_id, punish_damage, edgeguard_linked, victim_death_percent, death_frame
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  for (const r of rows) {
+    stmt.run(
+      gameId,
+      r.attackerIsPlayer ? 1 : 0,
+      r.conversionStartFrame,
+      r.lastHitFrame,
+      r.conversionEndFrame,
+      r.openerMoveId,
+      r.enderMoveId,
+      r.enderLabel,
+      r.enderFamily,
+      r.openingType,
+      r.moveCount,
+      r.damage,
+      r.startPercent,
+      r.endPercent,
+      r.didKill ? 1 : 0,
+      r.victimEndState,
+      r.victimEndX,
+      r.victimEndY,
+      r.victimEndPercent,
+      r.attackerFirstActionableFrame,
+      r.framesFromLastHitToActionable,
+      r.postHitDecision,
+      r.postHitMoveId,
+      r.postHitMoveLabel,
+      r.postHitStartFrame,
+      r.postHitConnected == null ? null : r.postHitConnected ? 1 : 0,
+      r.postHitOnShield == null ? null : r.postHitOnShield ? 1 : 0,
+      r.extended ? 1 : 0,
+      r.whiffed ? 1 : 0,
+      r.punished ? 1 : 0,
+      r.punishDelay,
+      r.punishOpenerMoveId,
+      r.punishDamage,
+      r.edgeguardLinked ? 1 : 0,
+      r.victimDeathPercent,
+      r.deathFrame,
+    );
+  }
+}
+
 // ── Backfill support ─────────────────────────────────────────────────
 
 export interface BackfillCandidate {
@@ -1539,6 +1741,7 @@ export function deleteFrameEventRows(gameId: number): void {
     "shield_blocks",
     "whiff_events",
     "opening_events",
+    "combo_ending_events",
   ]) {
     db.prepare(`DELETE FROM ${table} WHERE game_id = ?`).run(gameId);
   }
@@ -3730,6 +3933,41 @@ export function getPatternData(filters: PatternScopeFilters): PatternData | null
     GROUP BY oe.situation, oe.opener_family, oe.opener_label
     ORDER BY count DESC, kills DESC, oe.opener_label`);
 
+  // Combo-ending rows are written only by the current detector, so this
+  // ledger also uses CURRENT (like openings and death verdicts).
+  const comboEndingTotals = one<{
+    total: number;
+    kills: number;
+    squandered: number;
+    extended: number;
+    whiffed: number;
+    punished: number;
+    edgeguardLinked: number;
+  }>(`
+    SELECT COUNT(*) as total, COALESCE(SUM(ce.did_kill), 0) as kills,
+      COALESCE(SUM(CASE WHEN ce.end_percent >= 100 AND ce.did_kill = 0 THEN 1 ELSE 0 END), 0) as squandered,
+      COALESCE(SUM(ce.extended), 0) as extended,
+      COALESCE(SUM(ce.whiffed), 0) as whiffed,
+      COALESCE(SUM(ce.punished), 0) as punished,
+      COALESCE(SUM(ce.edgeguard_linked), 0) as edgeguardLinked
+    FROM combo_ending_events ce
+    WHERE ${CURRENT("ce.game_id")} AND ce.attacker_is_player = 1`);
+  const comboEnders = q<PatternData["comboEndings"]["enders"][number]>(`
+    SELECT ce.ender_label as label, ce.ender_family as family, COUNT(*) as count,
+      COALESCE(SUM(ce.did_kill), 0) as kills
+    FROM combo_ending_events ce
+    WHERE ${CURRENT("ce.game_id")} AND ce.attacker_is_player = 1
+    GROUP BY ce.ender_family, ce.ender_label
+    ORDER BY count DESC, kills DESC, ce.ender_label
+    LIMIT 8`);
+  const comboPunishOpeners = q<{ moveId: number | null; count: number }>(`
+    SELECT ce.punish_opener_move_id as moveId, COUNT(*) as count
+    FROM combo_ending_events ce
+    WHERE ${CURRENT("ce.game_id")} AND ce.attacker_is_player = 1 AND ce.punished = 1
+    GROUP BY ce.punish_opener_move_id
+    ORDER BY count DESC
+    LIMIT 3`);
+
   const shieldTaken = shieldByMove.reduce((s, m) => s + m.taken, 0);
   const shieldMissed = shieldByMove.reduce((s, m) => s + m.missed, 0);
 
@@ -3739,6 +3977,14 @@ export function getPatternData(filters: PatternScopeFilters): PatternData | null
     currentGames: currentIds.length,
     habits,
     openingsAgainst: { ...openingTotals, buckets: openingBuckets },
+    comboEndings: {
+      ...comboEndingTotals,
+      enders: comboEnders,
+      topPunishOpeners: comboPunishOpeners.map((o) => ({
+        move: o.moveId == null ? "unattributed" : moveName(o.moveId),
+        count: o.count,
+      })),
+    },
     deaths: {
       total: deathTotals.total,
       verdicts,
@@ -4034,6 +4280,203 @@ export function getOpeningsAgainst(filters: OpeningsAgainstFilters = {}): Openin
     buckets: aggregateOpeningBuckets(events),
     clusters: clusterOpenings(events),
     examples,
+    options: {
+      characters: distinctValues("player_character"),
+      opponentCharacters: distinctValues("opponent_character"),
+      stages: distinctValues("stage"),
+    },
+  };
+}
+
+// ── Combo-ending ledger (v19) ────────────────────────────────────────
+
+interface ComboEndingDbRow {
+  id: number;
+  gameId: number;
+  conversionStartFrame: number;
+  lastHitFrame: number;
+  conversionEndFrame: number | null;
+  openerMoveId: number | null;
+  enderMoveId: number | null;
+  enderLabel: string;
+  enderFamily: string;
+  openingType: string;
+  moveCount: number;
+  damage: number;
+  startPercent: number;
+  endPercent: number;
+  didKill: number;
+  victimEndState: string;
+  victimEndX: number | null;
+  victimEndY: number | null;
+  victimEndPercent: number | null;
+  attackerFirstActionableFrame: number | null;
+  framesFromLastHitToActionable: number | null;
+  postHitDecision: string;
+  postHitMoveId: number | null;
+  postHitMoveLabel: string | null;
+  postHitStartFrame: number | null;
+  postHitConnected: number | null;
+  postHitOnShield: number | null;
+  extended: number;
+  whiffed: number;
+  punished: number;
+  punishDelay: number | null;
+  punishOpenerMoveId: number | null;
+  punishDamage: number;
+  edgeguardLinked: number;
+  victimDeathPercent: number | null;
+  deathFrame: number | null;
+}
+
+function toComboEndingEvent(row: ComboEndingDbRow, stageId: number | null): ComboEndingEvent {
+  return {
+    id: row.id,
+    gameId: row.gameId,
+    ...(stageId != null ? { stageId } : {}),
+    // Rows are already target-perspective (attacker_is_player = 1); the slot is
+    // only a perspective marker for the shared event type, not a demo slot.
+    attackerSlot: 0,
+    conversionStartFrame: row.conversionStartFrame,
+    lastHitFrame: row.lastHitFrame,
+    conversionEndFrame: row.conversionEndFrame,
+    openerMoveId: row.openerMoveId,
+    enderMoveId: row.enderMoveId,
+    enderLabel: row.enderLabel,
+    enderFamily: row.enderFamily as ComboEnderFamily,
+    openingType: row.openingType,
+    moveCount: row.moveCount,
+    damage: row.damage,
+    startPercent: row.startPercent,
+    endPercent: row.endPercent,
+    didKill: row.didKill === 1,
+    victimEndState: row.victimEndState as VictimEndState,
+    victimEndX: row.victimEndX,
+    victimEndY: row.victimEndY,
+    victimEndPercent: row.victimEndPercent,
+    attackerFirstActionableFrame: row.attackerFirstActionableFrame,
+    framesFromLastHitToActionable: row.framesFromLastHitToActionable,
+    postHitDecision: row.postHitDecision as PostHitDecision,
+    postHitMoveId: row.postHitMoveId,
+    postHitMoveLabel: row.postHitMoveLabel,
+    postHitStartFrame: row.postHitStartFrame,
+    postHitConnected: row.postHitConnected == null ? null : row.postHitConnected === 1,
+    postHitOnShield: row.postHitOnShield == null ? null : row.postHitOnShield === 1,
+    extended: row.extended === 1,
+    whiffed: row.whiffed === 1,
+    punished: row.punished === 1,
+    punishDelay: row.punishDelay,
+    punishOpenerMoveId: row.punishOpenerMoveId,
+    punishDamage: row.punishDamage,
+    edgeguardLinked: row.edgeguardLinked === 1,
+    victimDeathPercent: row.victimDeathPercent,
+    deathFrame: row.deathFrame,
+  };
+}
+
+/**
+ * "How I End My Combos": own conversions (attacker_is_player = 1) in the
+ * scoped games, version-gated to the current detector, aggregated in TS.
+ * The persisted anchor is the final connected hit, never conversion end.
+ */
+export function getComboEndings(filters: ComboEndingsFilters = {}): ComboEndingsResult {
+  const db = getDb();
+  const limit = Math.min(
+    Math.max(Math.floor(filters.limit ?? COMBO_ENDINGS_DEFAULT_LIMIT), 1),
+    COMBO_ENDINGS_MAX_LIMIT,
+  );
+
+  const conditions: string[] = [];
+  const params: Record<string, unknown> = { v: FRAME_EVENTS_VERSION, limit };
+  if (filters.character) {
+    conditions.push("g.player_character = @character");
+    params.character = filters.character;
+  }
+  if (filters.opponentCharacter) {
+    conditions.push("g.opponent_character = @opponentCharacter");
+    params.opponentCharacter = filters.opponentCharacter;
+  }
+  if (filters.stage) {
+    conditions.push("g.stage = @stage");
+    params.stage = filters.stage;
+  }
+  if (filters.opponentKey) {
+    conditions.push("(g.opponent_tag = @opponentKey OR g.opponent_connect_code = @opponentKey)");
+    params.opponentKey = filters.opponentKey;
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const scopeRows = db
+    .prepare(
+      `SELECT g.id as id, g.stage as stage, g.opponent_character as opponentCharacter,
+              COALESCE(g.events_version, 1) >= @v as current
+       FROM games g
+       ${where}
+       ORDER BY COALESCE(g.played_at, '') DESC, g.id DESC
+       LIMIT @limit`,
+    )
+    .all(params) as { id: number; stage: string; opponentCharacter: string; current: number }[];
+
+  const currentRows = scopeRows.filter((row) => row.current);
+  const stageById = new Map(scopeRows.map((row) => [row.id, row.stage]));
+  const opponentById = new Map(scopeRows.map((row) => [row.id, row.opponentCharacter]));
+
+  let rows: ComboEndingDbRow[] = [];
+  if (currentRows.length > 0) {
+    const placeholders = currentRows.map(() => "?").join(", ");
+    rows = db
+      .prepare(
+        `SELECT
+           ce.id, ce.game_id as gameId,
+           ce.conversion_start_frame as conversionStartFrame,
+           ce.last_hit_frame as lastHitFrame,
+           ce.conversion_end_frame as conversionEndFrame,
+           ce.opener_move_id as openerMoveId, ce.ender_move_id as enderMoveId,
+           ce.ender_label as enderLabel, ce.ender_family as enderFamily,
+           ce.opening_type as openingType, ce.move_count as moveCount, ce.damage,
+           ce.start_percent as startPercent, ce.end_percent as endPercent,
+           ce.did_kill as didKill, ce.victim_end_state as victimEndState,
+           ce.victim_end_x as victimEndX, ce.victim_end_y as victimEndY,
+           ce.victim_end_percent as victimEndPercent,
+           ce.attacker_first_actionable_frame as attackerFirstActionableFrame,
+           ce.frames_from_last_hit_to_actionable as framesFromLastHitToActionable,
+           ce.post_hit_decision as postHitDecision, ce.post_hit_move_id as postHitMoveId,
+           ce.post_hit_move_label as postHitMoveLabel,
+           ce.post_hit_start_frame as postHitStartFrame,
+           ce.post_hit_connected as postHitConnected, ce.post_hit_on_shield as postHitOnShield,
+           ce.extended, ce.whiffed, ce.punished, ce.punish_delay as punishDelay,
+           ce.punish_opener_move_id as punishOpenerMoveId, ce.punish_damage as punishDamage,
+           ce.edgeguard_linked as edgeguardLinked,
+           ce.victim_death_percent as victimDeathPercent, ce.death_frame as deathFrame
+         FROM combo_ending_events ce
+         WHERE ce.attacker_is_player = 1
+           AND ce.game_id IN (${placeholders})
+         ORDER BY ce.game_id, ce.last_hit_frame, ce.id`,
+      )
+      .all(...currentRows.map((row) => row.id)) as ComboEndingDbRow[];
+  }
+
+  const events = rows.map((row) => {
+    const event = toComboEndingEvent(row, stageIdFromName(stageById.get(row.gameId) ?? "") ?? null);
+    const opponentCharacter = opponentById.get(row.gameId);
+    return opponentCharacter ? { ...event, opponentCharacter } : event;
+  });
+  const gamesWithEndings = new Set(events.map((event) => event.gameId)).size;
+
+  const distinctValues = (column: "player_character" | "opponent_character" | "stage"): string[] =>
+    (
+      db.prepare(`SELECT DISTINCT ${column} as value FROM games ORDER BY value ASC`).all() as {
+        value: string;
+      }[]
+    ).map((row) => row.value);
+
+  return {
+    coverage: {
+      gamesInScope: scopeRows.length,
+      gamesWithEndings,
+      gamesParsedCurrent: currentRows.length,
+    },
+    summary: summarizeComboEndings(events),
     options: {
       characters: distinctValues("player_character"),
       opponentCharacters: distinctValues("opponent_character"),

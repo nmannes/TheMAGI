@@ -12,11 +12,11 @@ clips per run. A clip is always one of:
 
 1. **Opening hit taken** — the first hit of a conversion the opponent lands on
    the target player. Follow-up hits in that conversion are not separate
-   events. The clip starts 5 seconds before the hit and ends 2 seconds after it
+   events. The clip starts 10 seconds before the hit and ends 2 seconds after it
    (2.5 seconds when the hit itself took the stock). The caption reports what
    the full conversion became.
 2. **Conversion landed** — a conversion where the target player is the attacker
-   and at least two hits connected. The clip starts 5 seconds before the first
+   and at least two hits connected. The clip starts 10 seconds before the first
    hit and ends 5 seconds after the player's last hit. One-hit conversions do
    not qualify.
 

@@ -119,11 +119,12 @@ function classifySituation(s: number): OpeningSituation {
 }
 
 /** Project display name, falling back to slippi's short name for unknown ids. */
-function displayMoveName(moveId: number): string {
+export function displayMoveName(moveId: number): string {
   return moveIdToName[moveId] ?? getMoveName(moveId);
 }
 
-function familyOfMove(moveId: number | null): OpeningFamily {
+/** Exact move family used by the opening and combo-ending ledgers. */
+export function familyOfMove(moveId: number | null): OpeningFamily {
   if (moveId == null) return "special";
   if (moveId >= 13 && moveId <= 17) return "aerial";
   if (moveId >= 2 && moveId <= 12) return "grounded";

@@ -266,7 +266,7 @@ describe("selectOpeningClipExamples", () => {
 });
 
 describe("openingClipBounds", () => {
-  it("uses the chronological opening-hit rolls: 5s lead-in and 2s follow-through", () => {
+  it("uses the chronological opening-hit rolls: 10s lead-in and 2s follow-through", () => {
     const bounds = openingClipBounds(3000, 300);
     expect(bounds.startFrame).toBe(3000 - OPENING_CLIP_PRE_ROLL_FRAMES);
     expect(bounds.endFrame).toBe(3000 + OPENING_CLIP_POST_ROLL_FRAMES);

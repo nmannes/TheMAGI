@@ -16,7 +16,7 @@
 //
 // --render/--send turn the selected rule bucket (default: the most frequent)
 // or conversion-sequence cluster into headless Slippi clips. Clips show the opening
-// hit with 5s lead-in and 2s follow-through, matching the chronological
+// hit with 10s lead-in and 2s follow-through, matching the chronological
 // hit-review event. --send delivers through Telegram using
 // TELEGRAM_BOT_TOKEN/CHAT_ID.
 

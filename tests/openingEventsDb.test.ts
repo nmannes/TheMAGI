@@ -200,6 +200,7 @@ function events(openings: OpeningEvent[]): GameFrameEvents {
     shieldBlocks: [],
     whiffs: [],
     openings,
+    comboEndings: [],
     attacks: [[], []],
     neutralSegments: [],
   };
@@ -288,7 +289,7 @@ describe("opening ledger persistence", () => {
   });
 
   it("a plain backfill picks up games stamped with an older detector version", () => {
-    expect(FRAME_EVENTS_VERSION).toBe(4);
+    expect(FRAME_EVENTS_VERSION).toBe(5);
 
     const stale = seedGame();
     const current = seedGame();

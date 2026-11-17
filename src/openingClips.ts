@@ -13,8 +13,8 @@ import { FPS, frameToTimestamp } from "./pipeline/helpers.js";
 import type { OpeningExample } from "./pipeline/openingClusters.js";
 import type { OpeningsAgainstResult } from "./openingsAgainst.js";
 
-/** Five seconds of lead-in before the opening hit, like chronological hit review. */
-export const OPENING_CLIP_PRE_ROLL_FRAMES = 5 * FPS;
+/** Ten seconds of lead-in before the opening hit, like chronological hit review. */
+export const OPENING_CLIP_PRE_ROLL_FRAMES = 10 * FPS;
 /** Two seconds after the opening hit, enough to show the immediate response. */
 export const OPENING_CLIP_POST_ROLL_FRAMES = 2 * FPS;
 /** Hard cap shared with hit review, so a malformed duration cannot explode a clip. */
@@ -134,7 +134,7 @@ export function selectOpeningClipExamples(
 
 /**
  * Frame range for the opening-hit clip. Anchored on the conversion's first
- * stun/grab frame (opening_events.start_frame), with the same 5s/2s rolls as
+ * stun/grab frame (opening_events.start_frame), with the same 10s/2s rolls as
  * the chronological hit-review event. Capped at the replay's last playable
  * frame so the renderer never waits for a frame that does not exist.
  */

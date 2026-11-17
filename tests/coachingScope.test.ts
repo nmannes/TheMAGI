@@ -34,6 +34,17 @@ function emptyPatterns(label: string, games = 50): PatternData {
     currentGames: games,
     habits: [],
     openingsAgainst: { total: 0, games: 0, kills: 0, buckets: [] },
+    comboEndings: {
+      total: 0,
+      kills: 0,
+      squandered: 0,
+      enders: [],
+      extended: 0,
+      whiffed: 0,
+      punished: 0,
+      edgeguardLinked: 0,
+      topPunishOpeners: [],
+    },
     deaths: { total: 0, verdicts: {}, resourceFaults: 0, byKiller: [] },
     throwDI: [],
     whiffCapture: { opportunities: 0, punished: 0, unpunishedByMove: [] },
@@ -236,6 +247,30 @@ describe("formatPatternBreakdown", () => {
 
   it("NEGATIVE: a scope with nothing measured is omitted rather than printed empty", () => {
     expect(formatPatternBreakdown([emptyPatterns("vs Sheik", 12)])).toEqual([]);
+  });
+
+  it("adds combo-ending cost under the comboDecisionMin guard", () => {
+    const measured: PatternData = {
+      ...emptyPatterns("vs Fox", 40),
+      comboEndings: {
+        ...emptyPatterns("vs Fox", 40).comboEndings,
+        total: 60,
+        kills: 20,
+        squandered: 9,
+        punished: 12,
+      },
+    };
+    expect(formatPatternBreakdown([measured])).toEqual([
+      "  vs Fox (40 games): combo endings punished after your hit 20% of 60; combo endings at ≥100% with no stock 15% of 60",
+    ]);
+
+    const low: PatternData = {
+      ...emptyPatterns("vs Sheik", 10),
+      comboEndings: { ...emptyPatterns("vs Sheik", 10).comboEndings, total: 9, punished: 4, squandered: 2 },
+    };
+    expect(formatPatternBreakdown([low])).toEqual([
+      "  vs Sheik (10 games): combo endings punished after your hit 4/9 (low n); combo endings at ≥100% with no stock 2/9 (low n)",
+    ]);
   });
 
   it("adds openings against you under the openingsTotalMin guard", () => {

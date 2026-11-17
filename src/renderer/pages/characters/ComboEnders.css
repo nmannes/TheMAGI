@@ -1,0 +1,138 @@
+.combo-enders {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.combo-enders-intro {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.combo-enders-warning {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle, var(--border));
+  background: var(--surface-2);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.combo-enders-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .combo-enders-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.combo-enders-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.combo-enders-section-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.combo-enders-mono {
+  font-family: var(--font-mono);
+}
+
+.combo-enders-ratio {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.combo-enders-row-low {
+  opacity: 0.5;
+}
+
+.combo-enders-end-states {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.combo-enders-states {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.combo-enders-state-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--char-color, var(--accent)) 38%, var(--border-subtle, var(--border)));
+  background: var(--surface-2);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.combo-enders-state-chip b {
+  color: var(--text);
+}
+
+.combo-enders-caption {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.combo-enders-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.combo-enders-example-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--char-color, var(--accent)) 42%, var(--border-subtle, var(--border)));
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.combo-enders-example-chip:hover:not(:disabled) {
+  border-color: var(--char-color, var(--accent));
+  color: var(--text);
+}
+
+.combo-enders-example-chip:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.combo-enders-example-kill {
+  border-color: color-mix(in srgb, var(--win) 45%, var(--border-subtle, var(--border)));
+}
+
+.combo-enders-example-kill-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--win);
+}

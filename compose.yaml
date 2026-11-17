@@ -17,9 +17,13 @@ services:
       HIT_REVIEW_OUT: /data/hit-review
       HIT_REVIEW_CURSOR: /data/hit-review-cursor.json
     volumes:
-      - "${HOST_REPLAYS_DIR:-./replays}:/replays:ro"
-      - "${HOST_ASSETS_DIR:-./assets}:/assets:ro"
+      - "${HOST_REPLAYS_DIR:-${HOME}/Slippi}:/replays:ro"
+      # The opening ledger stores absolute replay paths, so the same folder is
+      # also mounted at its host path for `hit-review-docker.sh openings ...`.
+      - "${HOST_REPLAYS_DIR:-${HOME}/Slippi}:${HOST_REPLAYS_DIR:-${HOME}/Slippi}:ro"
+      - "${HOST_ASSETS_DIR:-${HOME}/clippi-assets}:/assets:ro"
       - "${HOST_DATA_DIR:-./data}:/data"
+      - "${HOST_MAGI_DIR:-${HOME}/.magi-melee}:/home/node/.magi-melee"
     shm_size: "1gb"
     security_opt:
       - no-new-privileges:true

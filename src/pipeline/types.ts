@@ -485,6 +485,10 @@ export type {
   OpeningEvent,
   OpeningSituation,
   OpeningFamily,
+  ComboEndingEvent,
+  ComboEnderFamily,
+  VictimEndState,
+  PostHitDecision,
 } from "./frameEvents.js";
 
 /** Historical player context for LLM coaching prompts */

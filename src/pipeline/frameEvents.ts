@@ -21,6 +21,7 @@ import { extractRecoverySpans } from "./recoveryEvents.js";
 import { extractShieldBlocks } from "./shieldEvents.js";
 import { extractWhiffEvents } from "./whiffEvents.js";
 import { extractOpeningEvents } from "./openingEvents.js";
+import { extractComboEndingEvents } from "./comboEndingEvents.js";
 
 // ── Action state constants not named in slippi-js's State table ────────
 // Verified against the community action-state map. The slippi-js enum
@@ -109,8 +110,12 @@ export interface ConversionRecord {
  *   4 — opening ledger (opening_events): the first hit in neutral of every
  *       conversion with the pre-hit victim/attacker state, position, percent,
  *       situation and opener family. A plain backfill populates the table.
+ *   5 — combo-ending ledger (combo_ending_events): per own conversion, the
+ *       final-hit anchor, ender, measured victim end state, first post-hit
+ *       decision after the measured endlag, and the extended/whiffed/punished/
+ *       edgeguard outcomes. A plain backfill populates the table.
  */
-export const FRAME_EVENTS_VERSION = 4;
+export const FRAME_EVENTS_VERSION = 5;
 
 /**
  * Measured-DI grade for a death (from the actual stick input).
@@ -376,6 +381,77 @@ export interface OpeningEvent {
   deathVerdict: DeathVerdict | null;
 }
 
+/** Exact move family of the conversion's final move (same vocabulary as openings). */
+export type ComboEnderFamily = "aerial" | "grounded" | "special" | "grab";
+
+/** Where the victim was once free of the final hit (or dead, for a kill). */
+export type VictimEndState = "dead" | "offstage" | "ledge" | "knockdown" | "airborne" | "onstage" | "unknown";
+
+/** First commitment after the attacker's measured endlag. "none" = no commitment in the window. */
+export type PostHitDecision = "attack" | "special" | "grab" | "reposition" | "defend" | "edgeguard" | "none";
+
+/**
+ * One own conversion's ending: the final connected hit (never endFrame), the
+ * ender move, where the victim ended up, the attacker's first commitment
+ * after the measured endlag, and the measured outcomes. See
+ * comboEndingEvents.ts. `reset` is not stored — it is derived from the flags.
+ */
+export interface ComboEndingEvent {
+  /** Set only when the record was loaded from the database. */
+  id?: number;
+  /** Set only when the record was loaded from the database. */
+  gameId?: number;
+  /** Stage of the event's game; set by the DB query for percent bands. */
+  stageId?: number;
+  /** Opponent character for the event's game; set by the DB query. */
+  opponentCharacter?: string;
+  attackerSlot: PlayerSlot;
+  conversionStartFrame: number;
+  /** Final connected hit frame (moves.at(-1).frame). */
+  lastHitFrame: number;
+  /** slippi-js conversion end (45-frame reset / stock-drop anchor), not the last hit. */
+  conversionEndFrame: number | null;
+  openerMoveId: number | null;
+  enderMoveId: number | null;
+  enderLabel: string;
+  enderFamily: ComboEnderFamily;
+  openingType: string;
+  moveCount: number;
+  damage: number;
+  startPercent: number;
+  endPercent: number;
+  didKill: boolean;
+  victimEndState: VictimEndState;
+  /** Position/percent at the first free victim frame (final-hit frame for a kill). */
+  victimEndX: number | null;
+  victimEndY: number | null;
+  victimEndPercent: number | null;
+  attackerFirstActionableFrame: number | null;
+  framesFromLastHitToActionable: number | null;
+  postHitDecision: PostHitDecision;
+  /** Exact move id only when the action state maps one to one; null for specials/grabs. */
+  postHitMoveId: number | null;
+  postHitMoveLabel: string | null;
+  postHitStartFrame: number | null;
+  /** null unless the first commitment was an attack/special/grab with a matched instance. */
+  postHitConnected: boolean | null;
+  postHitOnShield: boolean | null;
+  /** A new own conversion started inside the post-hit window. */
+  extended: boolean;
+  /** The post-hit attack instance never connected. */
+  whiffed: boolean;
+  /** An opponent conversion started inside the post-hit window. */
+  punished: boolean;
+  punishDelay: number | null;
+  punishOpenerMoveId: number | null;
+  /** Opponent damage dealt inside the post-hit window. */
+  punishDamage: number;
+  /** Victim was offstage/ledging and their recovery span overlaps the window. */
+  edgeguardLinked: boolean;
+  victimDeathPercent: number | null;
+  deathFrame: number | null;
+}
+
 export interface GameFrameEvents {
   conversions: ConversionRecord[];
   stocks: StockRecord[];
@@ -390,6 +466,8 @@ export interface GameFrameEvents {
   whiffs: WhiffEvent[];
   /** First hits in neutral of each conversion, both perspectives (opening ledger). */
   openings: OpeningEvent[];
+  /** Endings of own conversions, both perspectives (combo-ending ledger). */
+  comboEndings: ComboEndingEvent[];
   /** Attack commitments per slot. Computed, not persisted (Phase 2 consumers). */
   attacks: [AttackInstance[], AttackInstance[]];
   neutralSegments: NeutralSegment[];
@@ -1107,6 +1185,18 @@ export function extractFrameEvents(
 
   const openings = extractOpeningEvents(conversionRecords, stockRecords, frames, lastFrame, stageId, p0Index, p1Index);
 
+  const comboEndings = extractComboEndingEvents(
+    conversionRecords,
+    stockRecords,
+    frames,
+    lastFrame,
+    stageId,
+    p0Index,
+    p1Index,
+    attacks,
+    recoverySpans,
+  );
+
   return {
     conversions: conversionRecords,
     stocks: stockRecords,
@@ -1116,6 +1206,7 @@ export function extractFrameEvents(
     shieldBlocks,
     whiffs,
     openings,
+    comboEndings,
     attacks,
     neutralSegments,
   };

@@ -339,7 +339,7 @@ describe("extractReviewEvents", () => {
       endPercent: 42,
       didKill: false,
     });
-    expect(event.clipStartFrame).toBe(100);
+    expect(event.clipStartFrame).toBe(0);
     expect(event.clipEndFrame).toBe(520);
   });
 
@@ -366,7 +366,7 @@ describe("extractReviewEvents", () => {
     expect(event.damage).toBe(20);
     expect(event.startPercent).toBe(0);
     expect(event.endPercent).toBe(20);
-    expect(event.clipStartFrame).toBe(400);
+    expect(event.clipStartFrame).toBe(100);
     expect(event.clipEndFrame).toBe(1030);
   });
 

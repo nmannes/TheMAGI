@@ -141,6 +141,8 @@ export const EVENT_SAMPLE_GUARDS = {
   edgeguardCellMin: 8,
   openingsBucketMin: 8,
   openingsTotalMin: 25,
+  comboEnderMin: 5,
+  comboDecisionMin: 10,
   blurbGamesMin: 10,
 } as const;
 
@@ -162,6 +164,26 @@ export const OPENING_SITUATION_ORDER = [
   "landing",
 ] as const;
 export const OPENING_FAMILY_ORDER = ["aerial", "grounded", "special", "projectile", "grab"] as const;
+// Combo-ending ledger vocabulary (src/pipeline/comboEndingEvents.ts).
+export const COMBO_ENDER_FAMILY_ORDER = ["aerial", "grounded", "special", "grab"] as const;
+export const VICTIM_END_STATE_ORDER = [
+  "dead",
+  "offstage",
+  "ledge",
+  "knockdown",
+  "airborne",
+  "onstage",
+  "unknown",
+] as const;
+export const POST_HIT_DECISION_ORDER = [
+  "attack",
+  "special",
+  "grab",
+  "reposition",
+  "defend",
+  "edgeguard",
+  "none",
+] as const;
 export const RECOVERY_ROUTE_ORDER = ["high", "mid", "low"] as const;
 export const EDGEGUARD_DEPTH_ORDER = ["onstage", "ledge", "shallow", "deep"] as const;
 export const SHIELD_GRADE_ORDER = [

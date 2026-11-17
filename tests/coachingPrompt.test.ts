@@ -25,6 +25,17 @@ function emptyPatterns(label: string, games = 50): PatternData {
     currentGames: games,
     habits: [],
     openingsAgainst: { total: 0, games: 0, kills: 0, buckets: [] },
+    comboEndings: {
+      total: 0,
+      kills: 0,
+      squandered: 0,
+      enders: [],
+      extended: 0,
+      whiffed: 0,
+      punished: 0,
+      edgeguardLinked: 0,
+      topPunishOpeners: [],
+    },
     deaths: { total: 0, verdicts: {}, resourceFaults: 0, byKiller: [] },
     throwDI: [],
     whiffCapture: { opportunities: 0, punished: 0, unpunishedByMove: [] },
@@ -56,6 +67,13 @@ function withOpenings(
     ...base,
     openingsAgainst: { total, games: total > 0 ? base.games : 0, kills, buckets },
   };
+}
+
+function withComboEndings(
+  base: PatternData,
+  endings: Partial<PatternData["comboEndings"]> & Pick<PatternData["comboEndings"], "total" | "kills">,
+): PatternData {
+  return { ...base, comboEndings: { ...base.comboEndings, ...endings } };
 }
 
 describe("coaching system prompts (v2)", () => {
@@ -195,6 +213,154 @@ describe("formatRecurringPatterns", () => {
     const text = formatRecurringPatterns({ character: history, matchup: null }).join("\n");
     expect(text).toContain("Low n: 12 openings in all Marth");
     expect(text).not.toContain("Most frequent doors");
+  });
+
+  it("POSITIVE: prints how combos end with the exact ender, each post-hit outcome and the punish opener", () => {
+    const history = withComboEndings(emptyPatterns("all Marth"), {
+      total: 100,
+      kills: 22,
+      squandered: 9,
+      extended: 30,
+      whiffed: 40,
+      punished: 25,
+      edgeguardLinked: 12,
+      enders: [
+        { label: "nair", family: "aerial", count: 30, kills: 8 },
+        { label: "fair", family: "aerial", count: 12, kills: 4 },
+        { label: "bthrow", family: "grab", count: 6, kills: 1 },
+        { label: "dsmash", family: "grounded", count: 4, kills: 1 },
+      ],
+      topPunishOpeners: [
+        { move: "utilt", count: 8 },
+        { move: "grab", count: 3 },
+        { move: "nair", count: 2 },
+        { move: "dsmash", count: 1 },
+      ],
+    });
+    const text = formatRecurringPatterns({ character: history, matchup: null }).join("\n");
+    expect(text).toContain("How your combos end — one of your own conversions per row");
+    expect(text).toContain("not a verified true combo");
+    expect(text).toContain("Endings: all Marth 100 endings in 50 games");
+    expect(text).toContain("Endings that took the stock: all Marth 22% of 100");
+    expect(text).toContain(
+      "Ended at ≥100% without the stock (a fact, not a missed-kill claim): all Marth 9% of 100",
+    );
+    expect(text).toContain("After the last hit — a new conversion of yours started within 30f: all Marth 30% of 100");
+    expect(text).toContain(
+      "Your first post-hit direct attack or grab never connected (specials unverified): all Marth 40% of 100",
+    );
+    expect(text).toContain(
+      "You were punished (opponent conversion started within 30f of your first actionable frame): all Marth 25% of 100",
+    );
+    expect(text).toContain(
+      "Victim left offstage/ledging and their recovery span overlapped your post-hit window: all Marth 12% of 100",
+    );
+    expect(text).toContain(
+      "Most frequent enders (all Marth): nair x30 (8 kills, 27%); fair x12 (4 kills, 33%); bthrow x6 (1 kill, 17%, grab)",
+    );
+    // An ender below comboEnderMin (5) is never named, and only the top 3
+    // punish openers are printed.
+    expect(text).not.toContain("dsmash x4");
+    expect(text).toContain("Their most common punish opener after your hit (all Marth): utilt x8, grab x3, nair x2");
+    expect(text).not.toContain("dsmash x1");
+    expect(text).not.toContain("Low n:");
+  });
+
+  it("POSITIVE: the this-game column shows raw fractions and flags a deviation from history", () => {
+    const history = withComboEndings(emptyPatterns("all Marth"), {
+      total: 100,
+      kills: 22,
+      enders: [{ label: "nair", family: "aerial", count: 30, kills: 8 }],
+    });
+    const game = withComboEndings({ ...emptyPatterns("this game", 1), currentGames: 1 }, {
+      total: 4,
+      kills: 2,
+      squandered: 1,
+    });
+    const text = formatRecurringPatterns({ character: history, matchup: null }, game).join("\n");
+    expect(text).toContain("Endings: this game 4 endings · all Marth 100 endings in 50 games");
+    expect(text).toContain(
+      "Endings that took the stock: this game 2/4 (50%) · all Marth 22% of 100  ◄ this game +28 pts vs usual",
+    );
+    expect(text).toContain("Ended at ≥100% without the stock (a fact, not a missed-kill claim): this game 1/4 (25%)");
+  });
+
+  it("NEGATIVE: low-n combo endings print the caution and mark history rates low n", () => {
+    const history = withComboEndings(emptyPatterns("all Marth"), {
+      total: 8,
+      kills: 1,
+      punished: 2,
+      enders: [{ label: "nair", family: "aerial", count: 6, kills: 1 }],
+    });
+    const text = formatRecurringPatterns({ character: history, matchup: null }).join("\n");
+    expect(text).toContain("Endings that took the stock: all Marth 13% of 8, low n");
+    expect(text).toContain(
+      "Low n: 8 own conversions in all Marth — describe these endings, do not call any of them a habit.",
+    );
+    expect(text).toContain("Most frequent enders (all Marth): nair x6 (1 kill, 17%)");
+  });
+
+  it("NEGATIVE: says no ender is default when none reaches the ender guard", () => {
+    const history = withComboEndings(emptyPatterns("all Marth"), {
+      total: 12,
+      kills: 3,
+      enders: [
+        { label: "nair", family: "aerial", count: 3, kills: 1 },
+        { label: "fair", family: "aerial", count: 2, kills: 1 },
+      ],
+    });
+    const text = formatRecurringPatterns({ character: history, matchup: null }).join("\n");
+    expect(text).not.toContain("Most frequent enders");
+    expect(text).toContain(
+      "No single ender reaches 5 occurrences in all Marth; the endings are spread across too many moves to name one default ender.",
+    );
+    expect(text).not.toContain("Low n:");
+  });
+
+  it("merges combo endings across a set", () => {
+    const a = withComboEndings({ ...emptyPatterns("this game", 1), currentGames: 1 }, {
+      total: 3,
+      kills: 1,
+      extended: 1,
+      whiffed: 2,
+      punished: 2,
+      enders: [{ label: "nair", family: "aerial", count: 2, kills: 1 }],
+      topPunishOpeners: [{ move: "utilt", count: 2 }],
+    });
+    const b = withComboEndings({ ...emptyPatterns("this game", 1), currentGames: 1 }, {
+      total: 2,
+      kills: 0,
+      squandered: 1,
+      whiffed: 1,
+      punished: 1,
+      edgeguardLinked: 1,
+      enders: [
+        { label: "nair", family: "aerial", count: 1, kills: 0 },
+        { label: "fair", family: "aerial", count: 1, kills: 0 },
+      ],
+      topPunishOpeners: [
+        { move: "utilt", count: 1 },
+        { move: "dtilt", count: 1 },
+      ],
+    });
+    const merged = mergePatternData([a, b], "this set")!;
+    expect(merged.comboEndings).toEqual({
+      total: 5,
+      kills: 1,
+      squandered: 1,
+      extended: 1,
+      whiffed: 3,
+      punished: 3,
+      edgeguardLinked: 1,
+      enders: [
+        { label: "nair", family: "aerial", count: 3, kills: 1 },
+        { label: "fair", family: "aerial", count: 1, kills: 0 },
+      ],
+      topPunishOpeners: [
+        { move: "utilt", count: 3 },
+        { move: "dtilt", count: 1 },
+      ],
+    });
   });
 
   it("merges openings across a set", () => {

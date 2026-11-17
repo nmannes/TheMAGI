@@ -16,6 +16,7 @@ import {
   getCharacterGameStats,
   getCharacterEventProfile,
   getOpeningsAgainst,
+  getComboEndings,
   getOpponentDetail,
   getDashboardHighlights,
   getAnalysisHistory,
@@ -55,6 +56,7 @@ export function registerStatsHandlers(safeHandle: SafeHandleFn): void {
   safeHandle("stats:openingsAgainst", (_e, filters: Parameters<typeof getOpeningsAgainst>[0]) =>
     getOpeningsAgainst(filters),
   );
+  safeHandle("stats:comboEndings", (_e, filters: Parameters<typeof getComboEndings>[0]) => getComboEndings(filters));
   safeHandle("stats:opponentDetail", (_e, opponentKey: string) => getOpponentDetail(opponentKey));
   safeHandle("stats:dashboardHighlights", () => getDashboardHighlights());
   safeHandle("stats:analysisHistory", (_e, limit: number, offset: number, scopeFilter?: string) =>

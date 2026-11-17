@@ -1,6 +1,6 @@
 {
   "name": "magi-melee",
-  "version": "1.15.0",
+  "version": "1.16.0",
   "description": "Local-first Melee replay analysis, live Play Mode, and optional AI coaching",
   "main": "src/main/entry.js",
   "engines": {
@@ -24,7 +24,8 @@
     "verify:release": "node scripts/verify-release.cjs",
     "verify:docs": "node scripts/verify-docs.cjs",
     "backfill": "node scripts/backfill.js",
-    "openings": "tsx src/openings-cli.ts"
+    "openings": "tsx src/openings-cli.ts",
+    "combo-endings": "tsx src/combo-endings-cli.ts"
   },
   "keywords": [
     "melee",

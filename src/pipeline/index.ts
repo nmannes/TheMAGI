@@ -19,6 +19,20 @@ export { extractRecoverySpans } from "./recoveryEvents.js";
 export { extractShieldBlocks } from "./shieldEvents.js";
 export { extractWhiffEvents } from "./whiffEvents.js";
 export { extractOpeningEvents } from "./openingEvents.js";
+export { extractComboEndingEvents, POST_HIT_WINDOW_FRAMES } from "./comboEndingEvents.js";
+export { summarizeComboEndings, isComboReset } from "./comboEndings.js";
+export type {
+  ComboEndingSummary,
+  ComboEnderRow,
+  ComboDecisionRow,
+  ComboOutcomeRow,
+  ComboOutcomeKey,
+  ComboEndingCost,
+  ComboSquandered,
+  ComboEndingExample,
+  ComboEndStateRow,
+  ComboBandRow,
+} from "./comboEndings.js";
 export {
   aggregateOpeningBuckets,
   clusterOpenings,
@@ -120,4 +134,8 @@ export type {
   OpeningEvent,
   OpeningSituation,
   OpeningFamily,
+  ComboEndingEvent,
+  ComboEnderFamily,
+  VictimEndState,
+  PostHitDecision,
 } from "./types.js";

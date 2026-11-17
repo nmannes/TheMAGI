@@ -2,10 +2,11 @@
 # Daily hit-review job: walk forward through replay history and render the next
 # two review events, then send them to Telegram.
 #
-# An event is either the first hit of an opponent conversion (5 seconds before
-# the hit) or a landed conversion of at least two hits (5 seconds after the
-# player's last hit). A local cursor file records the most recent generated
-# clip, so each run continues chronologically without repeating clips.
+# An event is either the first hit of an opponent conversion (10 seconds before
+# the hit) or a landed conversion of at least two hits (10 seconds before its
+# first hit and 5 seconds after the player's last hit). A local cursor file
+# records the most recent generated clip, so each run continues chronologically
+# without repeating clips.
 #
 # Intended for cron or a systemd timer. It loads key.env from the repo root,
 # takes an flock so runs cannot overlap, and leaves rendered clips under

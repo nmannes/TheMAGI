@@ -87,6 +87,30 @@ if [[ ! -f "$MELEE_ISO" ]]; then
   exit 1
 fi
 
+# Openings clips use this same entrypoint: `scripts/hit-review-docker.sh
+# openings ...` passes "openings" as the first argument, and everything after
+# it goes to src/openings-cli.ts. The host ~/.magi-melee directory is mounted
+# at the container user's home so the CLI can read magi.db/config.json and
+# write clips to the same output folder as the host CLI.
+if [[ "${1:-}" == "openings" ]]; then
+  shift
+  MAGI_HOME="${HOME}/.magi-melee"
+  if [[ ! -f "$MAGI_HOME/magi.db" ]]; then
+    echo "MAGI database not found at $MAGI_HOME/magi.db." >&2
+    echo "Mount the host ~/.magi-melee directory at $MAGI_HOME." >&2
+    exit 1
+  fi
+  # Keep the banner off stdout so `openings --json` stays machine-readable.
+  {
+    echo "openings container"
+    echo "  replays:  $REPLAY_DIR"
+    echo "  assets:   $ASSETS_DIR"
+    echo "  database: $MAGI_HOME/magi.db"
+    echo "  telegram: ${TELEGRAM_BOT_TOKEN:+configured}"
+  } >&2
+  exec "$APP_DIR/node_modules/.bin/tsx" "$APP_DIR/src/openings-cli.ts" "$@"
+fi
+
 mkdir -p "$HIT_REVIEW_OUT" "$(dirname "$HIT_REVIEW_CURSOR")"
 
 echo "hit-review container"

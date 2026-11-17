@@ -54,6 +54,8 @@ The more games you have, the more there is to look through. Some stats need a fe
 
 **Performance Lab** helps you pick games to review, compare your recent results with earlier games, and keep track of your practice. Its **Openings against you** view groups the first hit in neutral you keep losing — not follow-up combo hits — by the situation you were in and the exact move that hit you, with descriptive conversion-sequence clusters per opponent character ("fair · fair · nair"). Filter by your character, the opponent's character, the stage, or the percent at the first hit (each sequence also shows its own low-to-high percent distribution), and open a replay example for the moment itself. From a source checkout, `npm run openings -- --send` renders and sends a clip of the most frequent bucket to Telegram.
 
+**How your combos end** looks at the other side of your conversions: the exact move each one ends with, where the opponent ended up, and what you did after your first actionable frame—whether the next hit connected, whether the opponent punished the attempt, and how often a conversion ended at 100% or more without taking the stock. It describes the measured sequence and outcome; it does not claim you dropped a combo or missed a kill.
+
 **Practice** can suggest a plan based on your games, with drills you can check off as you go. Keep a goal and a few notes visible in Play Mode to remind yourself what you're working on.
 
 **Oracle** is there when you have a question about your play. Try asking:
@@ -82,7 +84,7 @@ You can finish setup later and reopen it from **Settings → Setup wizard**. Set
 
 **Headless hit review (Linux):** the `hit-review` CLI walks your replay history and renders two review clips at a time — the opening hit you took or a conversion you landed — and can deliver them to Telegram on a schedule. See [docs/hit-review.md](docs/hit-review.md).
 
-**Docker:** the same headless hit-review pipeline runs in a container, with the ISO, playback build, replays, output and credentials mounted at run time. See [docs/docker.md](docs/docker.md).
+**Docker:** the headless hit-review and openings clip renderers run in a container, with the ISO, playback build, replays, database, output and credentials mounted at run time. See [docs/docker.md](docs/docker.md).
 
 ## Do I need to pay for AI?
 
@@ -119,6 +121,6 @@ The [setup guide](docs/USER_GUIDE.md) covers playing, replay review, coaching, a
 
 Want to help build MAGI? Start with the [developer guide](docs/DEVELOPMENT.md) and [contribution guide](CONTRIBUTING.md).
 
-**Version 1.15.0** · [What's changed](CHANGELOG.md) · [MIT License](LICENSE)
+**Version 1.16.0** · [What's changed](CHANGELOG.md) · [MIT License](LICENSE)
 
 MAGI stands for _Melee Analysis through Generative Intelligence_.

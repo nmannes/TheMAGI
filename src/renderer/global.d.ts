@@ -26,6 +26,10 @@ import type {
   OpeningsAgainstFilters as OpeningsFilters,
   OpeningsAgainstResult as OpeningsResult,
 } from "../openingsAgainst";
+import type {
+  ComboEndingsFilters as ComboEndingsFiltersContract,
+  ComboEndingsResult as ComboEndingsResultContract,
+} from "../comboEndings";
 import type { CornermanLiveEvent as LiveEvent } from "../cornermanLiveEvents";
 import type { ProviderId as LlmProviderId } from "../llm";
 import type { ProviderSpeechEvent, ProviderSpeechRequest } from "../providerVoice";
@@ -47,6 +51,8 @@ declare global {
   type CareerAnalysisResult = CareerResult;
   type OpeningsAgainstFilters = OpeningsFilters;
   type OpeningsAgainstResult = OpeningsResult;
+  type ComboEndingsFilters = ComboEndingsFiltersContract;
+  type ComboEndingsResult = ComboEndingsResultContract;
 
   interface CornermanStatus {
     active: boolean;
@@ -181,6 +187,7 @@ declare global {
       getCharacterGameStats: (character: string) => Promise<any[]>;
       getCharacterEventProfile: (character: string) => Promise<CharacterEventProfile>;
       getOpeningsAgainst: (filters: OpeningsAgainstFilters) => Promise<OpeningsAgainstResult>;
+      getComboEndings: (filters: ComboEndingsFilters) => Promise<ComboEndingsResult>;
       getOpponentDetail: (opponentKey: string) => Promise<any>;
       getDashboardHighlights: () => Promise<any>;
       getGameHighlights: (gameId: number) => Promise<any[]>;

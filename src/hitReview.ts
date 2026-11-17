@@ -20,8 +20,8 @@ import type {
 export const HIT_REVIEW_PRE_ROLL_FRAMES = 90;
 export const HIT_REVIEW_POST_ROLL_FRAMES = 90;
 export const HIT_REVIEW_DEATH_POST_ROLL_FRAMES = 150;
-/** Chronological review: 5 seconds of lead-in before an opening hit taken. */
-export const HIT_REVIEW_EVENT_PRE_ROLL_FRAMES = 5 * FPS;
+/** Chronological review: 10 seconds of lead-in before an opening hit taken. */
+export const HIT_REVIEW_EVENT_PRE_ROLL_FRAMES = 10 * FPS;
 /** A landed conversion keeps rolling for 5 seconds after the player's last hit. */
 export const HIT_REVIEW_EVENT_LANDED_POST_ROLL_FRAMES = 5 * FPS;
 /** An opening hit taken shows the immediate response, then stops. */
@@ -201,8 +201,9 @@ export function extractHitReview(result: GameResult, target: string, replayPath:
  *   2. every target-owned conversion with at least two hits (a landed conversion)
  *
  * Follow-up hits in an opponent conversion are deliberately not separate
- * events. The opening-hit event shows 5 seconds before that first hit; the
- * landed-conversion event shows 5 seconds after the target's last hit.
+ * events. The opening-hit event shows 10 seconds before that first hit; the
+ * landed-conversion event shows 10 seconds before its first hit and 5 seconds
+ * after the target's last hit.
  */
 export function extractReviewEvents(result: GameResult, target: string, replayPath: string): HitReviewSequence[] {
   const targetSlot = findTargetSlot(result.gameSummary.players, target);

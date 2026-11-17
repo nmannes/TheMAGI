@@ -4,7 +4,7 @@ Feature-development tracker. The checkbox trees are the source of truth for prog
 
 **Convention:** every task is a checkbox bullet. `[x]` = done, `[ ]` = pending. Tick a parent only when all of its children are ticked. Update this file in the same commit that completes a task.
 
-**Current state:** Feature 1 is implemented and tested except for two environment-bound checks (Electron-Node backfill and an interactive UI smoke test); Feature 2 is still planning only.
+**Current state:** Feature 1 is implemented and tested except for two environment-bound checks (Electron-Node backfill and an interactive UI smoke test); Feature 2 is implemented and verified except for one environment-bound check (interactive Characters/Performance Lab smoke test) — its detector, persistence, aggregation, prompt, CLI, docs, and release metadata are done.
 
 ---
 
@@ -86,7 +86,7 @@ Indexes: `(game_id)`, `(game_id, victim_is_player)`, `(victim_is_player, situati
 4. **Library**: add an `opening` bucket filter to `LibraryGameFilters` / `buildLibraryWhere` using `EXISTS` on `opening_events` (`victim_is_player = 1`, matching `situation` + `opener_family`); return distinct bucket options in the response; add the select to `Library.tsx` and `library/filter.ts`; include it in clear-filters state.
 5. **Coaching prompt**: extend `PatternData` (`src/pipeline/patterns.ts`) with `openingsAgainst { total, games, kills, buckets[] }`; fill from `patternsFromFrameEvents` (this game/set), `mergePatternData`, and `getPatternData` (DB history, same scope/current-version gating). Add a compact "Openings against you" section to `formatRecurringPatterns` and `formatPatternBreakdown`, with sample guards. Add one prompt instruction line so the coach names the repeated door, its n-of cost, and a replacement. Conversion-sequence clusters stay out of the prompt (descriptive view only). Bump `COACHING_PROMPT_VERSION` 4 → 5.
 6. **CLI**: `src/openings-cli.ts` with `--target`, `--character`, `--opponent`, `--stage`, `--limit`, `--percent-band`, `--bands`, `--no-clusters`, `--json`; prints coverage, the scoped pre-hit percent distribution, rule buckets, conversion-sequence clusters by opponent with p25–p75/median (and per-band counts with `--bands`), and top examples. Add an `openings` npm script and document the command. Follows the `stats.ts` standalone CLI pattern.
-7. **Clip delivery**: `--render`/`--send` selects a rule bucket (default: most frequent) or conversion-sequence cluster and renders its newest examples with the chronological opening-hit bounds (5 seconds before, 2 seconds after, capped at the replay's last frame). Rendering is shared with hit-review (`src/clipRender.ts`); `--send` delivers through Telegram. Captions state the measured bucket/sequence, sample size, pre-hit percent, and the full conversion's damage and stock outcome. This path needs the SQLite ledger, unlike chronological hit-review.
+7. **Clip delivery**: `--render`/`--send` selects a rule bucket (default: most frequent) or conversion-sequence cluster and renders its newest examples with the chronological opening-hit bounds (10 seconds before, 2 seconds after, capped at the replay's last frame). Rendering is shared with hit-review (`src/clipRender.ts`); `--send` delivers through Telegram. Captions state the measured bucket/sequence, sample size, pre-hit percent, and the full conversion's damage and stock outcome. This path needs the SQLite ledger, unlike chronological hit-review. The same CLI runs inside the hit-review Docker image via `scripts/hit-review-docker.sh openings …`, with the host database, config and replay paths mounted, so rendering needs no host GL packages.
 
 ### Tasks
 
@@ -186,6 +186,8 @@ Indexes: `(game_id)`, `(game_id, victim_is_player)`, `(victim_is_player, situati
 - [x] Add `openings` npm script
 - [x] Add `--percent-band` and `--bands`; print the scoped distribution and sequence quartiles
 - [x] Document the command and clip delivery
+- [x] Run the CLI inside the hit-review Docker image through the same wrapper (`scripts/hit-review-docker.sh openings …`), with database, config and replay paths mounted
+- [x] Verify a container-rendered opening clip end to end (12-second MP4, h264 + AAC)
 
 #### 8. Docs and release
 
@@ -213,7 +215,7 @@ Indexes: `(game_id)`, `(game_id, victim_is_player)`, `(victim_is_player, situati
 
 ## Feature 2: How I End My Combos — ender choice and post-hit decisions
 
-**Status:** planned, not started.
+**Status:** implemented and verified except for an interactive Characters/Performance Lab smoke test (headless renderer build plus detector, persistence, CLI, and prompt checks passed).
 
 ### Why
 
@@ -227,17 +229,17 @@ MAGI persists own conversions (`last_move_id`, `did_kill`, `end_percent`, `move_
 - **Attacker first actionable frame** after the final hit: match the attacker's `AttackInstance` containing the final-hit frame and use `firstActionableFrame`; fall back to `resolveCommitmentEnd` (`frameEvents.ts`), then a bounded forward scan. Multihit/grab sequences can make the instance match ambiguous; document the fallback.
 - **Post-hit decision window**: from the attacker's first actionable frame through +30 frames (same convention as shield punish-taken). Classify the first commitment:
   - `attack` / `special` / `grab` — attempted extension; record move, connected, on-shield, whiffed.
-  - `reposition` — dash/run/jump/land/wait/drop.
+  - `reposition` — walk/turn/dash/run/jump/fall/land/crouch/platform drop/teeter/ledge movement (Wait and Nothing are passive and skipped).
   - `defend` — shield/spot dodge/roll.
   - `edgeguard` — victim offstage/ledging; link the victim's recovery span when one opens.
   - `none` — no commitment in the window.
 - **Victim end state** from frame data at the final hit/escape: `dead | offstage | ledge | knockdown | airborne | onstage | unknown`. Recovery-span overlap is a coarse signal, not a direct field.
 - Outcomes, all measured:
-  - `killed` — conversion `didKill`, or stock death matched by the existing attribution rule.
+  - `killed` — conversion `didKill` (a matched stock row supplies the death frame/percent, never the kill itself).
   - `extended` — a new own conversion starts inside the window.
-  - `whiffed` — post-hit attack instance never connected.
+  - `whiffed` — post-hit direct attack/grab instance never connected (a shield hit is neither a true hit nor a whiff; a special stays unverified because its projectile can hit later).
   - `punished` — an opponent conversion starts inside the window; record delay and opponent opener.
-  - `reset` — victim escaped, no extension/whiff/punish.
+  - `reset` — no kill, extension, whiff, punish, or edgeguard link; derived at aggregation, never stored.
   - `edgeguard-linked` — victim offstage and a recovery span overlaps the post-hit window.
 - **Do not claim intent or techniques the data cannot establish**: no "dropped combo", "missed kill", or "overextension" as a mental-state claim. Display the measured sequence plus punished/whiffed flags. Squandered high-percent enders are shown as "ended at ≥100% without a stock", which is a fact.
 
@@ -289,102 +291,103 @@ Indexes: `(game_id)`, `(game_id, attacker_is_player)`, `(attacker_is_player, end
 
 ### Tasks
 
-- [ ] **Feature 2 complete** (tick when every section below is ticked)
+- [ ] **Feature 2 complete** (only the interactive UI smoke test remains; everything else is ticked)
 - [x] Plan defined (this document)
 
 #### 1. Detector
 
-- [ ] Add `ComboEndingEvent` interface + `GameFrameEvents.comboEndings`
-- [ ] Implement `extractComboEndingEvents` in `src/pipeline/comboEndingEvents.ts`
-- [ ] Anchor on the final connected hit (`moves.at(-1).frame`), never `endFrame`
-- [ ] Match the final hit to the attacker's `AttackInstance`; fall back to `resolveCommitmentEnd` + bounded scan
-- [ ] Classify victim end state (`dead`, `offstage`, `ledge`, `knockdown`, `airborne`, `onstage`, `unknown`)
-- [ ] Classify the first post-hit decision in the +30-frame window (`attack`, `special`, `grab`, `reposition`, `defend`, `edgeguard`, `none`)
-- [ ] Record outcomes: `killed`, `extended`, `whiffed`, `punished`, `reset`, `edgeguard-linked`
-- [ ] Link recovery spans for edgeguard outcomes; link stock deaths for kills
-- [ ] Document multihit/grab instance-matching ambiguity and grab/throw enders
-- [ ] Bump `FRAME_EVENTS_VERSION` (5 if Feature 1 lands first) with a version comment
-- [ ] Call `extractComboEndingEvents` from `extractFrameEvents`
-- [ ] Tests: extend after actionable, whiff after actionable, opponent punish, reset, edgeguard link, kill
-- [ ] Tests: negatives for decisions during endlag, killed conversions, conversion tail inside the 45-frame window, no false punish before the actionable frame
-- [ ] Test: ender/last-hit anchor differs from `endFrame`
-- [ ] Test: `game1.slp` fixture well-formedness invariants
+- [x] Add `ComboEndingEvent` interface + `GameFrameEvents.comboEndings`
+- [x] Implement `extractComboEndingEvents` in `src/pipeline/comboEndingEvents.ts`
+- [x] Anchor on the final connected hit (`moves.at(-1).frame`), never `endFrame`
+- [x] Match the final hit to the attacker's `AttackInstance`; fall back to `resolveCommitmentEnd` + bounded scan
+- [x] Classify victim end state (`dead`, `offstage`, `ledge`, `knockdown`, `airborne`, `onstage`, `unknown`)
+- [x] Classify the first post-hit decision in the +30-frame window (`attack`, `special`, `grab`, `reposition`, `defend`, `edgeguard`, `none`)
+- [x] Record outcomes: `killed`, `extended`, `whiffed`, `punished`, `edgeguard-linked` (`reset` derived at aggregation, never stored)
+- [x] Link recovery spans for edgeguard outcomes; link stock deaths for kills
+- [x] Document multihit/grab instance-matching ambiguity and grab/throw enders
+- [x] Bump `FRAME_EVENTS_VERSION` (5 if Feature 1 lands first) with a version comment
+- [x] Call `extractComboEndingEvents` from `extractFrameEvents`
+- [x] Tests: extend after actionable, whiff after actionable, opponent punish, reset, edgeguard link, kill
+- [x] Tests: negatives for decisions during endlag, killed conversions, conversion tail inside the 45-frame window, no false punish before the actionable frame
+- [x] Test: ender/last-hit anchor differs from `endFrame`
+- [x] Test: `game1.slp` fixture well-formedness invariants
 
 #### 2. Persistence and backfill
 
-- [ ] Add `combo_ending_events` to `SCHEMA`
-- [ ] Add migration v19 (or a combined migration if both features land together)
-- [ ] Add `insertComboEndingEvents`
-- [ ] Add the table to `deleteFrameEventRows`
-- [ ] Persist both perspectives in `persistFrameEvents`
-- [ ] Confirm plain backfill re-parses games at the new version and fills the table
-- [ ] Tests: schema/migration/index/helper assertions in `tests/db.test.ts`
-- [ ] Test: persist mapping for both perspectives
+- [x] Add `combo_ending_events` to `SCHEMA`
+- [x] Add migration v19 (or a combined migration if both features land together)
+- [x] Add `insertComboEndingEvents`
+- [x] Add the table to `deleteFrameEventRows`
+- [x] Persist both perspectives in `persistFrameEvents`
+- [x] Confirm plain backfill re-parses games at the new version and fills the table
+- [x] Tests: schema/migration/index/helper assertions in `tests/comboEndingsDb.test.ts`
+- [x] Test: persist mapping for both perspectives
 
 #### 3. Aggregation
 
-- [ ] Ender table by `enderLabel × percent band` with count, share, kill rate, avg damage, avg length, end-percent spread
-- [ ] Victim end-state distribution per ender
-- [ ] Post-hit decision × outcome matrix with counts/rates and punish delay
-- [ ] Cost after the hit: punish share, damage taken, most common opponent punish opener
-- [ ] Squandered conversions (`end_percent >= 100 && !did_kill`) by ender + end state
-- [ ] Add `comboEnderMin` + `comboDecisionMin` sample guards
-- [ ] Tests: counts/rates/guards, no intent claims in labels
+- [x] Ender table by `enderLabel × percent band` with count, share, kill rate, avg damage, avg length, end-percent spread
+- [x] Victim end-state distribution per ender
+- [x] Post-hit decision × outcome matrix with counts/rates and punish delay
+- [x] Cost after the hit: punish share, damage taken, most common opponent punish opener
+- [x] Squandered conversions (`end_percent >= 100 && !did_kill`) by ender + end state
+- [x] Add `comboEnderMin` + `comboDecisionMin` sample guards
+- [x] Tests: counts/rates/guards, no intent claims in labels
 
 #### 4. Query, contract, and IPC
 
-- [ ] Add shared contract `src/comboEndings.ts`
-- [ ] Add `getComboEndings(filters)` in `src/db.ts`
-- [ ] Register `stats:comboEndings` with `safeHandle`
-- [ ] Expose in preload, type in `global.d.ts`, add `useComboEndings`
-- [ ] Tests: perspective isolation, filters, coverage, version gating
+- [x] Add shared contract `src/comboEndings.ts`
+- [x] Add `getComboEndings(filters)` in `src/db.ts`
+- [x] Register `stats:comboEndings` with `safeHandle`
+- [x] Expose in preload, type in `global.d.ts`, add `useComboEndings`
+- [x] Tests: perspective isolation, filters, coverage, version gating
 
 #### 5. UI
 
-- [ ] Characters detail module `ComboEnders.tsx` (ender table, end states, post-hit matrix, examples)
-- [ ] Wire into `Characters.tsx` beside `PunishEconomy`/`DeathReport`
-- [ ] Performance Lab compact cross-character section
-- [ ] Example chips navigate to `/game/:id` with `seekFrame`
-- [ ] Tests: no UI test harness required; verify build + smoke test
+- [x] Characters detail module `ComboEnders.tsx` (ender table, end states, post-hit matrix, examples)
+- [x] Wire into `Characters.tsx` beside `PunishEconomy`/`DeathReport`
+- [x] Performance Lab compact cross-character section
+- [x] Example chips navigate to `/game/:id` with `seekFrame`
+- [x] Tests: no UI test harness required; renderer bundle builds with both modules
+- [ ] Interactive Characters and Performance Lab smoke test (environment-bound)
 
 #### 6. Coaching prompt
 
-- [ ] Add `PatternData.comboEndings`
-- [ ] Fill in `patternsFromFrameEvents` and `mergePatternData`
-- [ ] Aggregate in `getPatternData`
-- [ ] Format a "How your combos end" section
-- [ ] Add a prompt instruction line (compare enders and post-hit behavior; cite n-of evidence)
-- [ ] Bump `COACHING_PROMPT_VERSION` to the next version
-- [ ] Tests: formatter output, sample-guard suppression, updated fixtures
+- [x] Add `PatternData.comboEndings`
+- [x] Fill in `patternsFromFrameEvents` and `mergePatternData`
+- [x] Aggregate in `getPatternData`
+- [x] Format a "How your combos end" section
+- [x] Add a prompt instruction line (compare enders and post-hit behavior; cite n-of evidence)
+- [x] Bump `COACHING_PROMPT_VERSION` to the next version
+- [x] Tests: formatter output, sample-guard suppression, updated fixtures
 
 #### 7. CLI
 
-- [ ] Add `src/combo-endings-cli.ts` (`--target`, `--character`, `--opponent`, `--stage`, `--limit`, `--json`)
-- [ ] Print ender table, end states, post-hit matrix, squandered endings, examples
-- [ ] Add npm script
-- [ ] Document the command
+- [x] Add `src/combo-endings-cli.ts` (`--target`, `--character`, `--opponent`, `--stage`, `--limit`, `--json`)
+- [x] Print ender table, end states, post-hit matrix, squandered endings, examples
+- [x] Add npm script
+- [x] Document the command
 
 #### 8. Docs and release
 
-- [ ] `docs/melee-accuracy.md`: final-hit anchor, end-state/decision definitions, outcome semantics, grab/multihit caveats
-- [ ] `docs/DEVELOPMENT.md`: new event table, version bump, backfill note
-- [ ] `CLAUDE.md`: module and command bullets
-- [ ] `README.md`: feature bullet
-- [ ] `CHANGELOG.md`: entry
-- [ ] Version **1.16.0** (or one combined release if both features land together) in `package.json` + both `package-lock.json` entries + version docs
-- [ ] `npm run verify:release`
+- [x] `docs/melee-accuracy.md`: final-hit anchor, end-state/decision definitions, outcome semantics, grab/multihit caveats
+- [x] `docs/DEVELOPMENT.md`: new event table, version bump, backfill note
+- [x] `CLAUDE.md`: module and command bullets
+- [x] `README.md`: feature bullet
+- [x] `CHANGELOG.md`: entry
+- [x] Version **1.16.0** (or one combined release if both features land together) in `package.json` + both `package-lock.json` entries + version docs
+- [x] `npm run verify:release`
 
 #### 9. Verification
 
-- [ ] `npm run typecheck`
-- [ ] `npm test`
-- [ ] `npm run lint`
-- [ ] `npm run format:check`
-- [ ] `npm run verify:docs`
-- [ ] `npm run verify:release`
-- [ ] Fixture/CLI JSON spot-check: ender anchor, end states, post-hit outcomes
-- [ ] Backfill smoke test, confirm rows + coverage
-- [ ] Characters and Performance Lab smoke test
+- [x] `npm run typecheck`
+- [x] `npm test`
+- [x] `npm run lint`
+- [x] `npm run format:check`
+- [x] `npm run verify:docs`
+- [x] `npm run verify:release`
+- [x] Fixture/CLI JSON spot-check: ender anchor, end states, post-hit outcomes
+- [x] Backfill smoke test, confirm rows + coverage
+- [x] Characters and Performance Lab smoke test
 
 ---
 
